@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 
+import 'package:estatetrack1/data/mock_auth_repository.dart';
 import 'package:estatetrack1/screens/home/home_screen.dart';
+import 'package:estatetrack1/screens/login/create_account_screen.dart';
+import 'package:estatetrack1/screens/login/forgot_password_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -10,20 +13,47 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final _emailController = TextEditingController();
+  final _identifierController = TextEditingController();
   final _passwordController = TextEditingController();
 
   @override
   void dispose() {
-    _emailController.dispose();
+    _identifierController.dispose();
     _passwordController.dispose();
     super.dispose();
   }
 
   void _onLogin() {
+    final account = MockAuthRepository.instance.login(
+      identifier: _identifierController.text,
+      password: _passwordController.text,
+    );
+    if (account == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Invalid credentials or inactive account.')),
+      );
+      return;
+    }
+
     Navigator.of(context).pushReplacement(
       MaterialPageRoute<void>(
-        builder: (context) => const HomeScreen(),
+        builder: (context) => HomeScreen(account: account),
+      ),
+    );
+  }
+
+  void _goToCreateAccount() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => const CreateAccountScreen(),
+      ),
+    );
+  }
+
+  void _goToForgotPassword() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => const ForgotPasswordScreen(),
       ),
     );
   }
@@ -64,12 +94,12 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
               const SizedBox(height: 48),
               TextField(
-                controller: _emailController,
+                controller: _identifierController,
                 keyboardType: TextInputType.emailAddress,
                 autocorrect: false,
                 decoration: const InputDecoration(
-                  labelText: 'Email',
-                  prefixIcon: Icon(Icons.email_outlined),
+                  labelText: 'Email or Phone',
+                  prefixIcon: Icon(Icons.alternate_email_rounded),
                 ),
               ),
               const SizedBox(height: 16),
@@ -86,10 +116,35 @@ class _LoginScreenState extends State<LoginScreen> {
                 onPressed: _onLogin,
                 child: const Text('Login'),
               ),
+              const SizedBox(height: 12),
+              TextButton(
+                onPressed: _goToForgotPassword,
+                child: const Text('Forgot Password?'),
+              ),
+              TextButton(
+                onPressed: _goToCreateAccount,
+                child: const Text('Create Account'),
+              ),
+              const SizedBox(height: 8),
+              const _QuickAccessHint(),
             ],
           ),
         ),
       ),
+    );
+  }
+}
+
+class _QuickAccessHint extends StatelessWidget {
+  const _QuickAccessHint();
+
+  @override
+  Widget build(BuildContext context) {
+    final style = Theme.of(context).textTheme.bodySmall;
+    return Text(
+      'Demo admin: admin@estatetrack.com / Admin@123',
+      textAlign: TextAlign.center,
+      style: style,
     );
   }
 }
