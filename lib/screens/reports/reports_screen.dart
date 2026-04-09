@@ -58,7 +58,7 @@ class ReportsScreen extends StatelessWidget {
                 border: Border.all(color: scheme.outlineVariant),
               ),
               child: Text(
-                'Charts coming soon',
+                'C',
                 style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                       color: scheme.onSurfaceVariant,
                     ),
