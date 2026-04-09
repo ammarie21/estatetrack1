@@ -284,7 +284,7 @@ class _AdminAccountsScreenState extends State<AdminAccountsScreen> {
                     } else if (value == 'reset') {
                       _resetPassword(account);
                     } else if (value == 'toggle') {
-                      MockAuthRepository.instance.updateAccount(
+                      final error = MockAuthRepository.instance.updateAccount(
                         id: account.id,
                         name: account.name,
                         email: account.email,
@@ -292,7 +292,13 @@ class _AdminAccountsScreenState extends State<AdminAccountsScreen> {
                         role: account.role,
                         isActive: !account.isActive,
                       );
-                      setState(() {});
+                      if (error != null) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text(error)),
+                        );
+                      } else {
+                        setState(() {});
+                      }
                     } else if (value == 'delete') {
                       MockAuthRepository.instance.deleteAccount(account.id);
                       setState(() {});

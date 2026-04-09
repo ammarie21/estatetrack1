@@ -32,11 +32,14 @@ class MockAuthRepository {
     required String identifier,
     required String password,
   }) {
-    final normalized = identifier.trim().toLowerCase();
+    final normalizedEmail = identifier.trim().toLowerCase();
+    final normalizedPhone = identifier.trim();
+    final normalizedPassword = password.trim();
     final account = _accounts.firstWhere(
       (a) =>
-          (a.email.toLowerCase() == normalized || a.phone == normalized) &&
-          a.password == password,
+          (a.email.toLowerCase() == normalizedEmail ||
+              a.phone == normalizedPhone) &&
+          a.password == normalizedPassword,
       orElse: () => AccountModel(
         id: '',
         name: '',
@@ -82,10 +85,14 @@ class MockAuthRepository {
     required String password,
     required String role,
   }) {
-    if (_accounts.any((a) => a.email.toLowerCase() == email.toLowerCase())) {
+    final normalizedEmail = email.trim().toLowerCase();
+    final normalizedPhone = phone.trim();
+    final normalizedPassword = password.trim();
+
+    if (_accounts.any((a) => a.email.toLowerCase() == normalizedEmail)) {
       return 'Email already exists.';
     }
-    if (_accounts.any((a) => a.phone == phone)) {
+    if (_accounts.any((a) => a.phone == normalizedPhone)) {
       return 'Phone already exists.';
     }
 
@@ -93,9 +100,9 @@ class MockAuthRepository {
       AccountModel(
         id: DateTime.now().millisecondsSinceEpoch.toString(),
         name: name.trim(),
-        email: email.trim(),
-        phone: phone.trim(),
-        password: password,
+        email: normalizedEmail,
+        phone: normalizedPhone,
+        password: normalizedPassword,
         role: role,
       ),
     );
@@ -110,21 +117,27 @@ class MockAuthRepository {
     required String role,
     required bool isActive,
   }) {
-    final account = _accounts.firstWhere((a) => a.id == id);
+    final normalizedEmail = email.trim().toLowerCase();
+    final normalizedPhone = phone.trim();
+    final accountIndex = _accounts.indexWhere((a) => a.id == id);
+    if (accountIndex == -1) {
+      return 'Account not found.';
+    }
+    final account = _accounts[accountIndex];
     final emailTaken = _accounts.any(
-      (a) => a.id != id && a.email.toLowerCase() == email.toLowerCase(),
+      (a) => a.id != id && a.email.toLowerCase() == normalizedEmail,
     );
     if (emailTaken) {
       return 'Email already used by another account.';
     }
-    final phoneTaken = _accounts.any((a) => a.id != id && a.phone == phone);
+    final phoneTaken = _accounts.any((a) => a.id != id && a.phone == normalizedPhone);
     if (phoneTaken) {
       return 'Phone already used by another account.';
     }
 
     account.name = name.trim();
-    account.email = email.trim();
-    account.phone = phone.trim();
+    account.email = normalizedEmail;
+    account.phone = normalizedPhone;
     account.role = role;
     account.isActive = isActive;
     return null;
@@ -138,19 +151,24 @@ class MockAuthRepository {
     required String id,
     required String newPassword,
   }) {
-    final ruleError = validatePasswordRules(newPassword);
+    final normalizedPassword = newPassword.trim();
+    final ruleError = validatePasswordRules(normalizedPassword);
     if (ruleError != null) {
       return ruleError;
     }
-    final account = _accounts.firstWhere((a) => a.id == id);
-    account.password = newPassword;
+    final accountIndex = _accounts.indexWhere((a) => a.id == id);
+    if (accountIndex == -1) {
+      return 'Account not found.';
+    }
+    _accounts[accountIndex].password = normalizedPassword;
     return null;
   }
 
   String forgotPassword(String identifier) {
-    final normalized = identifier.trim().toLowerCase();
+    final normalizedEmail = identifier.trim().toLowerCase();
+    final normalizedPhone = identifier.trim();
     final exists = _accounts.any(
-      (a) => a.email.toLowerCase() == normalized || a.phone == normalized,
+      (a) => a.email.toLowerCase() == normalizedEmail || a.phone == normalizedPhone,
     );
     if (!exists) {
       return 'No account found with this email/phone.';
