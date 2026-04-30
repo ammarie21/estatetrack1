@@ -53,13 +53,22 @@ class _ApartmentFormScreenState extends State<ApartmentFormScreen> {
     final baths = int.tryParse(_bathrooms.text) ?? 0;
     final e = widget.existing;
     final model = ApartmentModel(
-      id: e?.id ?? 0,
-      number: _number.text.trim(),
-      location: _location.text.trim(),
-      rent: rent,
+      apartmentId: e?.apartmentId ?? 0,
+      buildingId: 1, // Default, perhaps add to form later
+      typeId: 1, // Default
+      sizeM2: 100, // Default
+      rentPricePerMonth: rent,
+      rentPricePerDay: rent / 30, // Approximate
+      isAvailable: !_occupied,
       bedrooms: beds,
       bathrooms: baths,
-      isOccupied: _occupied,
+      hasBalcony: true, // Default
+      furnished: true, // Default
+      hasInternet: true, // Default
+      parking: true, // Default
+      elevator: true, // Default
+      number: _number.text.trim(),
+      location: _location.text.trim(),
     );
     Navigator.of(context).pop(model);
   }

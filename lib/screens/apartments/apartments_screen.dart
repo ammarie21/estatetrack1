@@ -18,56 +18,101 @@ class _ApartmentsScreenState extends State<ApartmentsScreen> {
     super.initState();
     _apartments = [
       const ApartmentModel(
-        id: 1,
+        apartmentId: 1,
+        buildingId: 1,
+        typeId: 1,
+        sizeM2: 80,
+        rentPricePerMonth: 450,
+        rentPricePerDay: 15,
+        isAvailable: false,
+        bedrooms: 2,
+        bathrooms: 2,
+        hasBalcony: true,
+        furnished: true,
+        hasInternet: true,
+        parking: true,
+        elevator: true,
         number: 'A-101',
         location: 'Tower A, Floor 1',
-        rent: 450,
-        bedrooms: 2,
-        bathrooms: 2,
-        isOccupied: true,
       ),
       const ApartmentModel(
-        id: 2,
-        number: 'A-102',
-        location: 'Tower A, Floor 1',
-        rent: 420,
+        apartmentId: 2,
+        buildingId: 1,
+        typeId: 1,
+        sizeM2: 75,
+        rentPricePerMonth: 420,
+        rentPricePerDay: 14,
+        isAvailable: true,
         bedrooms: 2,
         bathrooms: 1,
-        isOccupied: false,
+        hasBalcony: false,
+        furnished: true,
+        hasInternet: true,
+        parking: false,
+        elevator: true,
+        number: 'A-102',
+        location: 'Tower A, Floor 1',
       ),
       const ApartmentModel(
-        id: 3,
+        apartmentId: 3,
+        buildingId: 2,
+        typeId: 2,
+        sizeM2: 120,
+        rentPricePerMonth: 680,
+        rentPricePerDay: 22.67,
+        isAvailable: false,
+        bedrooms: 3,
+        bathrooms: 2,
+        hasBalcony: true,
+        furnished: true,
+        hasInternet: true,
+        parking: true,
+        elevator: true,
         number: 'B-204',
         location: 'Tower B, Floor 2',
-        rent: 680,
-        bedrooms: 3,
-        bathrooms: 2,
-        isOccupied: true,
       ),
       const ApartmentModel(
-        id: 4,
+        apartmentId: 4,
+        buildingId: 2,
+        typeId: 2,
+        sizeM2: 110,
+        rentPricePerMonth: 650,
+        rentPricePerDay: 21.67,
+        isAvailable: false,
+        bedrooms: 3,
+        bathrooms: 2,
+        hasBalcony: true,
+        furnished: false,
+        hasInternet: true,
+        parking: true,
+        elevator: true,
         number: 'B-205',
         location: 'Tower B, Floor 2',
-        rent: 650,
-        bedrooms: 3,
-        bathrooms: 2,
-        isOccupied: true,
       ),
       const ApartmentModel(
-        id: 5,
-        number: 'C-310',
-        location: 'Tower C, Floor 3',
-        rent: 890,
+        apartmentId: 5,
+        buildingId: 3,
+        typeId: 3,
+        sizeM2: 150,
+        rentPricePerMonth: 890,
+        rentPricePerDay: 29.67,
+        isAvailable: true,
         bedrooms: 4,
         bathrooms: 3,
-        isOccupied: false,
+        hasBalcony: true,
+        furnished: true,
+        hasInternet: true,
+        parking: true,
+        elevator: true,
+        number: 'C-310',
+        location: 'Tower C, Floor 3',
       ),
     ];
   }
 
   int _nextId() {
     if (_apartments.isEmpty) return 1;
-    return _apartments.map((e) => e.id).reduce((a, b) => a > b ? a : b) + 1;
+    return _apartments.map((e) => e.apartmentId).reduce((a, b) => a > b ? a : b) + 1;
   }
 
   Future<void> _openForm({ApartmentModel? existing}) async {
@@ -80,12 +125,12 @@ class _ApartmentsScreenState extends State<ApartmentsScreen> {
 
     setState(() {
       if (existing != null) {
-        final i = _apartments.indexWhere((a) => a.id == existing.id);
+        final i = _apartments.indexWhere((a) => a.apartmentId == existing.apartmentId);
         if (i >= 0) {
-          _apartments[i] = result.copyWith(id: existing.id);
+          _apartments[i] = result.copyWith(apartmentId: existing.apartmentId);
         }
       } else {
-        _apartments.add(result.copyWith(id: _nextId()));
+        _apartments.add(result.copyWith(apartmentId: _nextId()));
       }
     });
 
@@ -120,7 +165,7 @@ class _ApartmentsScreenState extends State<ApartmentsScreen> {
     if (ok != true || !mounted) return;
 
     setState(() {
-      _apartments.removeWhere((e) => e.id == a.id);
+      _apartments.removeWhere((e) => e.apartmentId == a.apartmentId);
     });
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Apartment deleted')),
@@ -182,7 +227,7 @@ class _ApartmentsScreenState extends State<ApartmentsScreen> {
               child: ListTile(
                 contentPadding: const EdgeInsets.symmetric(horizontal: 8),
                 title: Text(
-                  a.number,
+                  a.number ?? '',
                   style: const TextStyle(fontWeight: FontWeight.w600),
                 ),
                 subtitle: Padding(
@@ -190,7 +235,7 @@ class _ApartmentsScreenState extends State<ApartmentsScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(a.location),
+                      Text(a.location ?? ''),
                       const SizedBox(height: 4),
                       Text(
                         r'$' '${a.rent.toStringAsFixed(0)} / month',

@@ -45,9 +45,11 @@ class _CustomerFormScreenState extends State<CustomerFormScreen> {
   void _save() {
     final e = widget.existing;
     final model = CustomerModel(
-      id: e?.id ?? 0,
+      customerId: e?.customerId ?? 0,
       name: _name.text.trim(),
       phone: _phone.text.trim(),
+      nationalNum: _idNumber.text.trim(),
+      numberOfRentedApartments: 1, // Default
       idNumber: _idNumber.text.trim(),
       apartment: _apartment.text.trim(),
       startDate: _startDate.text.trim(),

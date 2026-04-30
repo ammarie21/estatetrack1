@@ -18,27 +18,33 @@ class _CustomersScreenState extends State<CustomersScreen> {
     super.initState();
     _customers = [
       const CustomerModel(
-        id: 1,
+        customerId: 1,
         name: 'Sara Al-Masri',
         phone: '+962 79 000 1111',
+        nationalNum: '9900123456',
+        numberOfRentedApartments: 1,
         idNumber: '9900123456',
         apartment: 'A-101',
         startDate: '2024-06-01',
         endDate: '2025-05-31',
       ),
       const CustomerModel(
-        id: 2,
+        customerId: 2,
         name: 'Omar Haddad',
         phone: '+962 78 222 3333',
+        nationalNum: '8800654321',
+        numberOfRentedApartments: 1,
         idNumber: '8800654321',
         apartment: 'B-204',
         startDate: '2024-01-15',
         endDate: '2025-01-14',
       ),
       const CustomerModel(
-        id: 3,
+        customerId: 3,
         name: 'Layla Nasser',
         phone: '+962 77 444 5555',
+        nationalNum: '7700112233',
+        numberOfRentedApartments: 1,
         idNumber: '7700112233',
         apartment: 'C-310',
         startDate: '2023-09-01',
@@ -49,7 +55,7 @@ class _CustomersScreenState extends State<CustomersScreen> {
 
   int _nextId() {
     if (_customers.isEmpty) return 1;
-    return _customers.map((e) => e.id).reduce((a, b) => a > b ? a : b) + 1;
+    return _customers.map((e) => e.customerId).reduce((a, b) => a > b ? a : b) + 1;
   }
 
   Future<void> _openForm({CustomerModel? existing}) async {
@@ -62,12 +68,12 @@ class _CustomersScreenState extends State<CustomersScreen> {
 
     setState(() {
       if (existing != null) {
-        final i = _customers.indexWhere((c) => c.id == existing.id);
+        final i = _customers.indexWhere((c) => c.customerId == existing.customerId);
         if (i >= 0) {
-          _customers[i] = result.copyWith(id: existing.id);
+          _customers[i] = result.copyWith(customerId: existing.customerId);
         }
       } else {
-        _customers.add(result.copyWith(id: _nextId()));
+        _customers.add(result.copyWith(customerId: _nextId()));
       }
     });
 
@@ -100,7 +106,7 @@ class _CustomersScreenState extends State<CustomersScreen> {
     if (ok != true || !mounted) return;
 
     setState(() {
-      _customers.removeWhere((e) => e.id == c.id);
+      _customers.removeWhere((e) => e.customerId == c.customerId);
     });
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Customer deleted')),
@@ -171,7 +177,7 @@ class _CustomersScreenState extends State<CustomersScreen> {
                     children: [
                       Text(c.phone),
                       const SizedBox(height: 2),
-                      Text('Apartment: ${c.apartment}'),
+                      Text('Apartment: ${c.apartment ?? ''}'),
                     ],
                   ),
                 ),

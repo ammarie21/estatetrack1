@@ -1,39 +1,88 @@
 class ApartmentModel {
   const ApartmentModel({
-    required this.id,
-    required this.number,
-    required this.location,
-    required this.rent,
+    required this.apartmentId,
+    required this.buildingId,
+    required this.typeId,
+    required this.sizeM2,
+    required this.rentPricePerMonth,
+    required this.rentPricePerDay,
+    required this.isAvailable,
     required this.bedrooms,
     required this.bathrooms,
-    required this.isOccupied,
+    required this.hasBalcony,
+    required this.furnished,
+    required this.hasInternet,
+    required this.parking,
+    required this.elevator,
+    this.notes,
+    this.description,
+    this.number,
+    this.location,
   });
 
-  final int id;
-  final String number;
-  final String location;
-  final double rent;
+  final int apartmentId;
+  final int buildingId;
+  final int typeId;
+  final int sizeM2;
+  final double rentPricePerMonth;
+  final double rentPricePerDay;
+  final bool isAvailable;
   final int bedrooms;
   final int bathrooms;
-  final bool isOccupied;
+  final bool hasBalcony;
+  final bool furnished;
+  final bool hasInternet;
+  final bool parking;
+  final bool elevator;
+  final String? notes;
+  final String? description;
+  final String? number;
+  final String? location;
+
+  // Getters for compatibility
+  int get id => apartmentId;
+  double get rent => rentPricePerMonth;
+  bool get isOccupied => !isAvailable;
 
   ApartmentModel copyWith({
-    int? id,
-    String? number,
-    String? location,
-    double? rent,
+    int? apartmentId,
+    int? buildingId,
+    int? typeId,
+    int? sizeM2,
+    double? rentPricePerMonth,
+    double? rentPricePerDay,
+    bool? isAvailable,
     int? bedrooms,
     int? bathrooms,
-    bool? isOccupied,
+    bool? hasBalcony,
+    bool? furnished,
+    bool? hasInternet,
+    bool? parking,
+    bool? elevator,
+    String? notes,
+    String? description,
+    String? number,
+    String? location,
   }) {
     return ApartmentModel(
-      id: id ?? this.id,
-      number: number ?? this.number,
-      location: location ?? this.location,
-      rent: rent ?? this.rent,
+      apartmentId: apartmentId ?? this.apartmentId,
+      buildingId: buildingId ?? this.buildingId,
+      typeId: typeId ?? this.typeId,
+      sizeM2: sizeM2 ?? this.sizeM2,
+      rentPricePerMonth: rentPricePerMonth ?? this.rentPricePerMonth,
+      rentPricePerDay: rentPricePerDay ?? this.rentPricePerDay,
+      isAvailable: isAvailable ?? this.isAvailable,
       bedrooms: bedrooms ?? this.bedrooms,
       bathrooms: bathrooms ?? this.bathrooms,
-      isOccupied: isOccupied ?? this.isOccupied,
+      hasBalcony: hasBalcony ?? this.hasBalcony,
+      furnished: furnished ?? this.furnished,
+      hasInternet: hasInternet ?? this.hasInternet,
+      parking: parking ?? this.parking,
+      elevator: elevator ?? this.elevator,
+      notes: notes ?? this.notes,
+      description: description ?? this.description,
+      number: number ?? this.number,
+      location: location ?? this.location,
     );
   }
 }

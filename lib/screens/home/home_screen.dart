@@ -2,8 +2,9 @@ import 'package:flutter/material.dart';
 
 import 'package:estatetrack1/data/mock_auth_repository.dart';
 import 'package:estatetrack1/models/account_model.dart';
-import 'package:estatetrack1/screens/apartments/apartments_screen.dart';
+import 'package:estatetrack1/screens/buildings/buildings_screen.dart';
 import 'package:estatetrack1/screens/admin/admin_accounts_screen.dart';
+import 'package:estatetrack1/screens/contracts/contracts_screen.dart';
 import 'package:estatetrack1/screens/customers/customers_screen.dart';
 import 'package:estatetrack1/screens/dashboard/dashboard_screen.dart';
 import 'package:estatetrack1/screens/login/login_screen.dart';
@@ -38,7 +39,8 @@ class _HomeScreenState extends State<HomeScreen> {
     final titles = [
       'Dashboard',
       'Customers',
-      'Apartments',
+      'Buildings',
+      'Contracts',
       'Payments',
       'Reports',
       if (isAdmin) 'Accounts',
@@ -46,7 +48,8 @@ class _HomeScreenState extends State<HomeScreen> {
     final screens = [
       const DashboardScreen(),
       const CustomersScreen(),
-      const ApartmentsScreen(),
+      const BuildingsScreen(),
+      const ContractsScreen(),
       const PaymentsScreen(),
       const ReportsScreen(),
       if (isAdmin) const AdminAccountsScreen(),
@@ -65,7 +68,12 @@ class _HomeScreenState extends State<HomeScreen> {
       const BottomNavigationBarItem(
         icon: Icon(Icons.apartment_outlined),
         activeIcon: Icon(Icons.apartment),
-        label: 'Apartments',
+        label: 'Buildings',
+      ),
+      const BottomNavigationBarItem(
+        icon: Icon(Icons.description_outlined),
+        activeIcon: Icon(Icons.description),
+        label: 'Contracts',
       ),
       const BottomNavigationBarItem(
         icon: Icon(Icons.account_balance_wallet_outlined),
