@@ -36,9 +36,9 @@ class MockAuthRepository {
     final normalizedPhone = identifier.trim();
     final normalizedPassword = password.trim();
     final account = _accounts.firstWhere(
-      (a) =>
-          (a.email.toLowerCase() == normalizedEmail ||
-              a.phone == normalizedPhone) &&
+          (a) =>
+      (a.email.toLowerCase() == normalizedEmail ||
+          a.phone == normalizedPhone) &&
           a.password == normalizedPassword,
       orElse: () => AccountModel(
         id: '',
@@ -125,7 +125,7 @@ class MockAuthRepository {
     }
     final account = _accounts[accountIndex];
     final emailTaken = _accounts.any(
-      (a) => a.id != id && a.email.toLowerCase() == normalizedEmail,
+          (a) => a.id != id && a.email.toLowerCase() == normalizedEmail,
     );
     if (emailTaken) {
       return 'Email already used by another account.';
@@ -168,7 +168,7 @@ class MockAuthRepository {
     final normalizedEmail = identifier.trim().toLowerCase();
     final normalizedPhone = identifier.trim();
     final exists = _accounts.any(
-      (a) => a.email.toLowerCase() == normalizedEmail || a.phone == normalizedPhone,
+          (a) => a.email.toLowerCase() == normalizedEmail || a.phone == normalizedPhone,
     );
     if (!exists) {
       return 'No account found with this email/phone.';

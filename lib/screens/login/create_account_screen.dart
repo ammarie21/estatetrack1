@@ -70,7 +70,7 @@ class _CreateAccountScreenState extends State<CreateAccountScreen> {
                     prefixIcon: Icon(Icons.person_outline),
                   ),
                   validator: (value) =>
-                      (value == null || value.trim().isEmpty) ? 'Required' : null,
+                  (value == null || value.trim().isEmpty) ? 'Required' : null,
                 ),
                 const SizedBox(height: 12),
                 TextFormField(
@@ -95,7 +95,7 @@ class _CreateAccountScreenState extends State<CreateAccountScreen> {
                     prefixIcon: Icon(Icons.phone_outlined),
                   ),
                   validator: (value) =>
-                      (value == null || value.trim().isEmpty) ? 'Required' : null,
+                  (value == null || value.trim().isEmpty) ? 'Required' : null,
                 ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(

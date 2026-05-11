@@ -20,7 +20,8 @@ class ApartmentReturnFormScreen extends StatefulWidget {
   final List<ApartmentModel> apartments;
 
   @override
-  State<ApartmentReturnFormScreen> createState() => _ApartmentReturnFormScreenState();
+  State<ApartmentReturnFormScreen> createState() =>
+      _ApartmentReturnFormScreenState();
 }
 
 class _ApartmentReturnFormScreenState extends State<ApartmentReturnFormScreen> {
@@ -29,6 +30,7 @@ class _ApartmentReturnFormScreenState extends State<ApartmentReturnFormScreen> {
   late final TextEditingController _actualTotalDueAmount;
   late final TextEditingController _finalCheckNotes;
   DateTime? _returnDate;
+  int? _bookingIdFromContract;
 
   @override
   void initState() {
@@ -45,6 +47,10 @@ class _ApartmentReturnFormScreenState extends State<ApartmentReturnFormScreen> {
     );
     _finalCheckNotes = TextEditingController(text: e?.finalCheckNotes ?? '');
     _returnDate = e?.actualReturnDate;
+    _bookingIdFromContract = e?.bookingId;
+    if (_bookingIdFromContract == null && widget.contracts.length == 1) {
+      _bookingIdFromContract = widget.contracts.first.bookingId;
+    }
   }
 
   @override
@@ -54,6 +60,24 @@ class _ApartmentReturnFormScreenState extends State<ApartmentReturnFormScreen> {
     _actualTotalDueAmount.dispose();
     _finalCheckNotes.dispose();
     super.dispose();
+  }
+
+  String _contractLabel(ContractModel c) {
+    var cust = 'Customer';
+    for (final x in widget.customers) {
+      if (x.customerId == c.customerId) {
+        cust = x.name;
+        break;
+      }
+    }
+    var apt = '#${c.apartmentId}';
+    for (final x in widget.apartments) {
+      if (x.apartmentId == c.apartmentId) {
+        apt = x.number ?? '#${x.apartmentId}';
+        break;
+      }
+    }
+    return 'Booking ${c.bookingId} · $cust · $apt';
   }
 
   void _save() {
@@ -67,15 +91,24 @@ class _ApartmentReturnFormScreenState extends State<ApartmentReturnFormScreen> {
       );
       return;
     }
+    if (_bookingIdFromContract == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Select the contract / booking')),
+      );
+      return;
+    }
 
     final e = widget.existing;
     final model = ApartmentReturnModel(
       returnId: e?.returnId ?? 0,
+      bookingId: _bookingIdFromContract,
       actualReturnDate: _returnDate!,
       actualRentalDays: rentalDays,
       additionalCharges: additionalCharges,
       actualTotalDueAmount: totalDueAmount,
-      finalCheckNotes: _finalCheckNotes.text.trim().isEmpty ? null : _finalCheckNotes.text.trim(),
+      finalCheckNotes: _finalCheckNotes.text.trim().isEmpty
+          ? null
+          : _finalCheckNotes.text.trim(),
     );
     Navigator.of(context).pop(model);
   }
@@ -97,6 +130,15 @@ class _ApartmentReturnFormScreenState extends State<ApartmentReturnFormScreen> {
   @override
   Widget build(BuildContext context) {
     final isEdit = widget.existing != null;
+    final contractItems = widget.contracts.isEmpty
+        ? <DropdownMenuItem<int>>[]
+        : widget.contracts.map((c) {
+            return DropdownMenuItem(
+              value: c.bookingId,
+              child: Text(_contractLabel(c)),
+            );
+          }).toList();
+
     return Scaffold(
       appBar: AppBar(
         title: Text(isEdit ? 'Edit Return' : 'Add Return'),
@@ -104,6 +146,28 @@ class _ApartmentReturnFormScreenState extends State<ApartmentReturnFormScreen> {
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
+          if (widget.contracts.isNotEmpty)
+            InputDecorator(
+              decoration: const InputDecoration(
+                labelText: 'Agreement / booking',
+                prefixIcon: Icon(Icons.link_outlined),
+                border: OutlineInputBorder(),
+              ),
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<int>(
+                  isExpanded: true,
+                  value: _bookingIdFromContract,
+                  items: contractItems,
+                  onChanged: (v) => setState(() => _bookingIdFromContract = v),
+                ),
+              ),
+            )
+          else
+            Text(
+              'Add a lease agreement first to link this return to a booking.',
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+          const SizedBox(height: 16),
           Row(
             children: [
               Expanded(

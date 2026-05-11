@@ -44,7 +44,7 @@ class RentalBookingModel {
       startDate: startDate ?? this.startDate,
       endDate: endDate ?? this.endDate,
       initialTotalDueAmount:
-          initialTotalDueAmount ?? this.initialTotalDueAmount,
+      initialTotalDueAmount ?? this.initialTotalDueAmount,
       bookingType: bookingType ?? this.bookingType,
       periodFee: periodFee ?? this.periodFee,
       initialCheckNotes: initialCheckNotes ?? this.initialCheckNotes,

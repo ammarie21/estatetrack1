@@ -26,11 +26,11 @@ class _AdminAccountsScreenState extends State<AdminAccountsScreen> {
     return accounts
         .where(
           (a) =>
-              a.name.toLowerCase().contains(query) ||
-              a.email.toLowerCase().contains(query) ||
-              a.phone.contains(query) ||
-              a.role.toLowerCase().contains(query),
-        )
+      a.name.toLowerCase().contains(query) ||
+          a.email.toLowerCase().contains(query) ||
+          a.phone.contains(query) ||
+          a.role.toLowerCase().contains(query),
+    )
         .toList();
   }
 
@@ -71,21 +71,21 @@ class _AdminAccountsScreenState extends State<AdminAccountsScreen> {
                         controller: nameController,
                         decoration: const InputDecoration(labelText: 'Name'),
                         validator: (v) =>
-                            (v == null || v.trim().isEmpty) ? 'Required' : null,
+                        (v == null || v.trim().isEmpty) ? 'Required' : null,
                       ),
                       const SizedBox(height: 10),
                       TextFormField(
                         controller: emailController,
                         decoration: const InputDecoration(labelText: 'Email'),
                         validator: (v) =>
-                            (v == null || !v.contains('@')) ? 'Invalid email' : null,
+                        (v == null || !v.contains('@')) ? 'Invalid email' : null,
                       ),
                       const SizedBox(height: 10),
                       TextFormField(
                         controller: phoneController,
                         decoration: const InputDecoration(labelText: 'Phone'),
                         validator: (v) =>
-                            (v == null || v.trim().isEmpty) ? 'Required' : null,
+                        (v == null || v.trim().isEmpty) ? 'Required' : null,
                       ),
                       const SizedBox(height: 10),
                       DropdownButtonFormField<String>(
@@ -105,7 +105,7 @@ class _AdminAccountsScreenState extends State<AdminAccountsScreen> {
                           controller: passwordController,
                           obscureText: true,
                           decoration:
-                              const InputDecoration(labelText: 'Initial Password'),
+                          const InputDecoration(labelText: 'Initial Password'),
                           validator: (v) {
                             if (v == null || v.isEmpty) return 'Required';
                             return MockAuthRepository.instance
@@ -156,7 +156,7 @@ class _AdminAccountsScreenState extends State<AdminAccountsScreen> {
                             setState(() {});
                           },
                           child:
-                              Text(account == null ? 'Create Account' : 'Save Changes'),
+                          Text(account == null ? 'Create Account' : 'Save Changes'),
                         ),
                       ),
                     ],

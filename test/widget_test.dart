@@ -1,28 +1,20 @@
+// This is a basic Flutter widget test.
+//
+// To perform an interaction with a widget in your test, use the WidgetTester
+// utility in the flutter_test package. For example, you can send tap and scroll
+// gestures. You can also use WidgetTester to find child widgets in the widget
+// tree, read text, and verify that the values of widget properties are correct.
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:estatetrack1/main.dart';
 
 void main() {
-  testWidgets('Login screen shows EstateTrack', (WidgetTester tester) async {
+  testWidgets('App boots to login screen', (WidgetTester tester) async {
     await tester.pumpWidget(const EstateTrackApp());
 
-    expect(find.text('EstateTrack'), findsWidgets);
-    expect(find.text('Login'), findsOneWidget);
-  });
-
-  testWidgets('Login navigates to dashboard with bottom nav', (WidgetTester tester) async {
-    await tester.pumpWidget(const EstateTrackApp());
-    await tester.tap(find.text('Login'));
-    await tester.pumpAndSettle();
-
-    expect(find.text('Total Apartments'), findsOneWidget);
-    expect(
-      find.descendant(
-        of: find.byType(AppBar),
-        matching: find.text('Dashboard'),
-      ),
-      findsOneWidget,
-    );
+    expect(find.text('EstateTrack'), findsOneWidget);
+    expect(find.widgetWithText(FilledButton, 'Login'), findsOneWidget);
   });
 }

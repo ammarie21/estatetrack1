@@ -1,12 +1,35 @@
 import 'package:flutter/material.dart';
-
+import 'package:estatetrack1/models/apartment_model.dart';
+import 'package:estatetrack1/models/apartment_return_model.dart';
+import 'package:estatetrack1/models/customer_model.dart';
 import 'package:estatetrack1/models/expense_model.dart';
-import 'package:estatetrack1/models/payment_model.dart';
+import 'package:estatetrack1/models/rental_booking_model.dart';
+import 'package:estatetrack1/models/rental_transaction_model.dart';
 import 'package:estatetrack1/screens/payments/expense_form_screen.dart';
-import 'package:estatetrack1/screens/payments/payment_form_screen.dart';
+import 'package:estatetrack1/screens/payments/rental_transaction_form_screen.dart';
+import 'package:estatetrack1/ui/app_components.dart';
 
 class PaymentsScreen extends StatefulWidget {
-  const PaymentsScreen({super.key});
+  const PaymentsScreen({
+    super.key,
+    required this.rentalTransactions,
+    required this.bookings,
+    required this.returns,
+    required this.customers,
+    required this.apartments,
+    required this.expenses,
+    required this.onRentalTransactionsChanged,
+    required this.onExpensesChanged,
+  });
+
+  final List<RentalTransactionModel> rentalTransactions;
+  final List<RentalBookingModel> bookings;
+  final List<ApartmentReturnModel> returns;
+  final List<CustomerModel> customers;
+  final List<ApartmentModel> apartments;
+  final List<ExpenseModel> expenses;
+  final void Function(List<RentalTransactionModel>) onRentalTransactionsChanged;
+  final void Function(List<ExpenseModel>) onExpensesChanged;
 
   @override
   State<PaymentsScreen> createState() => _PaymentsScreenState();
@@ -15,43 +38,26 @@ class PaymentsScreen extends StatefulWidget {
 class _PaymentsScreenState extends State<PaymentsScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
-  late List<PaymentModel> _payments;
+  late List<RentalTransactionModel> _transactions;
   late List<ExpenseModel> _expenses;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
-    _payments = [
-      const PaymentModel(
-        id: 1,
-        customer: 'Sara Al-Masri',
-        apartment: 'A-101',
-        amount: 450,
-        date: '2025-03-01',
-      ),
-      const PaymentModel(
-        id: 2,
-        customer: 'Omar Haddad',
-        apartment: 'B-204',
-        amount: 680,
-        date: '2025-03-02',
-      ),
-    ];
-    _expenses = [
-      const ExpenseModel(
-        id: 1,
-        category: 'Maintenance',
-        amount: 320,
-        date: '2025-03-05',
-      ),
-      const ExpenseModel(
-        id: 2,
-        category: 'Utilities',
-        amount: 180,
-        date: '2025-03-06',
-      ),
-    ];
+    _transactions = List.from(widget.rentalTransactions);
+    _expenses = List.from(widget.expenses);
+  }
+
+  @override
+  void didUpdateWidget(PaymentsScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.rentalTransactions != widget.rentalTransactions) {
+      _transactions = List.from(widget.rentalTransactions);
+    }
+    if (oldWidget.expenses != widget.expenses) {
+      _expenses = List.from(widget.expenses);
+    }
   }
 
   @override
@@ -60,9 +66,12 @@ class _PaymentsScreenState extends State<PaymentsScreen>
     super.dispose();
   }
 
-  int _nextPaymentId() {
-    if (_payments.isEmpty) return 1;
-    return _payments.map((e) => e.id).reduce((a, b) => a > b ? a : b) + 1;
+  int _nextTransactionId() {
+    if (_transactions.isEmpty) return 1;
+    return _transactions
+            .map((e) => e.transactionId)
+            .reduce((a, b) => a > b ? a : b) +
+        1;
   }
 
   int _nextExpenseId() {
@@ -70,53 +79,78 @@ class _PaymentsScreenState extends State<PaymentsScreen>
     return _expenses.map((e) => e.id).reduce((a, b) => a > b ? a : b) + 1;
   }
 
-  Future<void> _openPaymentForm({PaymentModel? existing}) async {
-    final result = await Navigator.of(context).push<PaymentModel>(
+  void _notifyTransactions() =>
+      widget.onRentalTransactionsChanged(_transactions);
+
+  void _notifyExpenses() => widget.onExpensesChanged(_expenses);
+
+  Future<void> _openTransactionForm({RentalTransactionModel? existing}) async {
+    final result = await Navigator.of(context).push<RentalTransactionModel>(
       MaterialPageRoute(
-        builder: (context) => PaymentFormScreen(existing: existing),
+        builder: (context) => RentalTransactionFormScreen(
+          existing: existing,
+          bookings: widget.bookings,
+          returns: widget.returns,
+          customers: widget.customers,
+          apartments: widget.apartments,
+        ),
       ),
     );
     if (!mounted || result == null) return;
 
     setState(() {
       if (existing != null) {
-        final i = _payments.indexWhere((p) => p.id == existing.id);
+        final i =
+            _transactions.indexWhere((t) => t.transactionId == existing.transactionId);
         if (i >= 0) {
-          _payments[i] = PaymentModel(
-            id: existing.id,
-            customer: result.customer,
-            apartment: result.apartment,
-            amount: result.amount,
-            date: result.date,
+          _transactions[i] = RentalTransactionModel(
+            transactionId: existing.transactionId,
+            bookingId: result.bookingId,
+            returnId: result.returnId,
+            paidInitialTotalDueAmount: result.paidInitialTotalDueAmount,
+            actualTotalDueAmount: result.actualTotalDueAmount,
+            totalRemaining: result.totalRemaining,
+            totalRefundedAmount: result.totalRefundedAmount,
+            transactionStatus: result.transactionStatus,
+            updatedTransactionDate: result.updatedTransactionDate,
+            paymentDetails: result.paymentDetails,
           );
         }
       } else {
-        _payments.add(
-          PaymentModel(
-            id: _nextPaymentId(),
-            customer: result.customer,
-            apartment: result.apartment,
-            amount: result.amount,
-            date: result.date,
+        _transactions.add(
+          RentalTransactionModel(
+            transactionId: _nextTransactionId(),
+            bookingId: result.bookingId,
+            returnId: result.returnId,
+            paidInitialTotalDueAmount: result.paidInitialTotalDueAmount,
+            actualTotalDueAmount: result.actualTotalDueAmount,
+            totalRemaining: result.totalRemaining,
+            totalRefundedAmount: result.totalRefundedAmount,
+            transactionStatus: result.transactionStatus,
+            updatedTransactionDate: result.updatedTransactionDate,
+            paymentDetails: result.paymentDetails,
           ),
         );
       }
     });
+    _notifyTransactions();
 
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(existing != null ? 'Payment updated' : 'Payment added'),
+        content: Text(
+          existing != null ? 'Transaction updated' : 'Transaction added',
+        ),
       ),
     );
   }
 
-  Future<void> _confirmDeletePayment(PaymentModel p) async {
+  Future<void> _confirmDeleteTransaction(RentalTransactionModel t) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Delete payment?'),
-        content: const Text('Remove this payment record?'),
+        title: const Text('Delete transaction?'),
+        content: const Text('Remove this rental transaction record?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -131,11 +165,13 @@ class _PaymentsScreenState extends State<PaymentsScreen>
     );
     if (ok != true || !mounted) return;
 
-    setState(() {
-      _payments.removeWhere((e) => e.id == p.id);
-    });
+    setState(() =>
+        _transactions.removeWhere((e) => e.transactionId == t.transactionId));
+    _notifyTransactions();
+
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Payment deleted')),
+      const SnackBar(content: Text('Transaction deleted')),
     );
   }
 
@@ -159,16 +195,15 @@ class _PaymentsScreenState extends State<PaymentsScreen>
           );
         }
       } else {
-        _expenses.add(
-          ExpenseModel(
-            id: _nextExpenseId(),
-            category: result.category,
-            amount: result.amount,
-            date: result.date,
-          ),
-        );
+        _expenses.add(ExpenseModel(
+          id: _nextExpenseId(),
+          category: result.category,
+          amount: result.amount,
+          date: result.date,
+        ));
       }
     });
+    _notifyExpenses();
 
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -198,12 +233,39 @@ class _PaymentsScreenState extends State<PaymentsScreen>
     );
     if (ok != true || !mounted) return;
 
-    setState(() {
-      _expenses.removeWhere((x) => x.id == e.id);
-    });
+    setState(() => _expenses.removeWhere((x) => x.id == e.id));
+    _notifyExpenses();
+
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Expense deleted')),
     );
+  }
+
+  String _bookingSubtitle(RentalTransactionModel t) {
+    RentalBookingModel? b;
+    for (final x in widget.bookings) {
+      if (x.bookingId == t.bookingId) {
+        b = x;
+        break;
+      }
+    }
+    if (b == null) return 'Booking ${t.bookingId}';
+    String? cust;
+    for (final c in widget.customers) {
+      if (c.customerId == b.customerId) {
+        cust = c.name;
+        break;
+      }
+    }
+    String? apt;
+    for (final a in widget.apartments) {
+      if (a.apartmentId == b.apartmentId) {
+        apt = a.number ?? '#${a.apartmentId}';
+        break;
+      }
+    }
+    return '${cust ?? 'Customer'} · ${apt ?? 'Unit'}';
   }
 
   @override
@@ -214,27 +276,43 @@ class _PaymentsScreenState extends State<PaymentsScreen>
       floatingActionButton: AnimatedBuilder(
         animation: _tabController,
         builder: (context, _) {
-          return FloatingActionButton(
+          final tx = _tabController.index == 0;
+          return FloatingActionButton.extended(
             heroTag: 'fab_payments',
             onPressed: () {
-              if (_tabController.index == 0) {
-                _openPaymentForm();
+              if (tx) {
+                _openTransactionForm();
               } else {
                 _openExpenseForm();
               }
             },
-            child: const Icon(Icons.add),
+            icon: Icon(tx ? Icons.post_add_rounded : Icons.add_rounded),
+            label: Text(tx ? 'New transaction' : 'New expense'),
           );
         },
       ),
       body: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          AnimatedBuilder(
+            animation: _tabController,
+            builder: (context, _) {
+              final tx = _tabController.index == 0;
+              return AppFlowBanner(
+                icon: tx ? Icons.sync_alt_rounded : Icons.savings_outlined,
+                text: tx
+                    ? 'Each line is a Rental Transaction: tie it to a Rental Booking. '
+                        'Link an Apartment Return when you are reconciling checkout.'
+                    : 'Expenses are internal costs — they do not replace Rental Transactions for tenant rent.',
+              );
+            },
+          ),
           Material(
             color: scheme.surface,
             child: TabBar(
               controller: _tabController,
               tabs: const [
-                Tab(text: 'Payments'),
+                Tab(text: 'Transactions'),
                 Tab(text: 'Expenses'),
               ],
             ),
@@ -243,7 +321,7 @@ class _PaymentsScreenState extends State<PaymentsScreen>
             child: TabBarView(
               controller: _tabController,
               children: [
-                _paymentsList(scheme),
+                _transactionsList(scheme),
                 _expensesList(scheme),
               ],
             ),
@@ -253,76 +331,79 @@ class _PaymentsScreenState extends State<PaymentsScreen>
     );
   }
 
-  Widget _paymentsList(ColorScheme scheme) {
-    if (_payments.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.receipt_long_outlined, size: 64, color: scheme.outline),
-              const SizedBox(height: 16),
-              Text(
-                'No payments yet',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Tap + to add a payment.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: scheme.onSurfaceVariant),
-              ),
-            ],
-          ),
-        ),
+  Widget _transactionsList(ColorScheme scheme) {
+    if (_transactions.isEmpty) {
+      return AppEmptyState(
+        icon: Icons.payments_outlined,
+        title: 'No rental transactions',
+        message:
+            'Create a transaction for each installment or settlement. Pick the Rental Booking; '
+            'add the Apartment Return when you are closing out after checkout.',
       );
     }
 
     return ListView.separated(
-      padding: const EdgeInsets.all(16),
-      itemCount: _payments.length,
-      separatorBuilder: (context, index) => const SizedBox(height: 10),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+      itemCount: _transactions.length,
+      separatorBuilder: (_, _) => const SizedBox(height: 10),
       itemBuilder: (context, index) {
-        final p = _payments[index];
+        final t = _transactions[index];
         return Card(
           child: ListTile(
-            title: Text(
-              p.customer,
-              style: const TextStyle(fontWeight: FontWeight.w600),
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            title: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Text(
+                    'Booking #${t.bookingId}',
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                ),
+                AppStatusChip(
+                  label: t.transactionStatus,
+                  tone: chipToneForBookingStatus(t.transactionStatus),
+                ),
+              ],
             ),
             subtitle: Padding(
-              padding: const EdgeInsets.only(top: 6),
+              padding: const EdgeInsets.only(top: 8),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Apartment: ${p.apartment}'),
-                  Text('Date: ${p.date}'),
+                  Text(_bookingSubtitle(t)),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Paid \$${t.paidInitialTotalDueAmount.toStringAsFixed(2)} · '
+                    'Remaining \$${t.totalRemaining.toStringAsFixed(2)}',
+                    style: TextStyle(
+                      color: scheme.onSurfaceVariant,
+                      fontSize: 13,
+                    ),
+                  ),
+                  Text(
+                    '${t.updatedTransactionDate.toString().split(' ')[0]}'
+                    '${t.returnId != null ? ' · Linked return #${t.returnId}' : ' · No return linked'}',
+                    style: TextStyle(
+                      color: scheme.outline,
+                      fontSize: 12,
+                    ),
+                  ),
                 ],
               ),
             ),
+            isThreeLine: true,
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: Text(
-                    r'$' '${p.amount.toStringAsFixed(2)}',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: scheme.primary,
-                    ),
-                  ),
-                ),
                 IconButton(
                   icon: const Icon(Icons.edit_outlined),
-                  tooltip: 'Edit',
-                  onPressed: () => _openPaymentForm(existing: p),
+                  onPressed: () => _openTransactionForm(existing: t),
                 ),
                 IconButton(
                   icon: Icon(Icons.delete_outline, color: scheme.error),
-                  tooltip: 'Delete',
-                  onPressed: () => _confirmDeletePayment(p),
+                  onPressed: () => _confirmDeleteTransaction(t),
                 ),
               ],
             ),
@@ -334,34 +415,17 @@ class _PaymentsScreenState extends State<PaymentsScreen>
 
   Widget _expensesList(ColorScheme scheme) {
     if (_expenses.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.receipt_outlined, size: 64, color: scheme.outline),
-              const SizedBox(height: 16),
-              Text(
-                'No expenses yet',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Tap + to add an expense.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: scheme.onSurfaceVariant),
-              ),
-            ],
-          ),
-        ),
+      return AppEmptyState(
+        icon: Icons.category_outlined,
+        title: 'No expenses logged',
+        message: 'Track utilities, maintenance, and other building costs here.',
       );
     }
 
     return ListView.separated(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
       itemCount: _expenses.length,
-      separatorBuilder: (context, index) => const SizedBox(height: 10),
+      separatorBuilder: (_, _) => const SizedBox(height: 10),
       itemBuilder: (context, index) {
         final e = _expenses[index];
         return Card(
@@ -374,24 +438,19 @@ class _PaymentsScreenState extends State<PaymentsScreen>
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: Text(
-                    r'$' '${e.amount.toStringAsFixed(2)}',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: scheme.tertiary,
-                    ),
+                Text(
+                  '\$${e.amount.toStringAsFixed(2)}',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: scheme.tertiary,
                   ),
                 ),
                 IconButton(
                   icon: const Icon(Icons.edit_outlined),
-                  tooltip: 'Edit',
                   onPressed: () => _openExpenseForm(existing: e),
                 ),
                 IconButton(
                   icon: Icon(Icons.delete_outline, color: scheme.error),
-                  tooltip: 'Delete',
                   onPressed: () => _confirmDeleteExpense(e),
                 ),
               ],

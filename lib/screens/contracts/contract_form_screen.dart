@@ -28,7 +28,8 @@ class _ContractFormScreenState extends State<ContractFormScreen> {
   late final TextEditingController _notes;
   late int? _selectedCustomerId;
   late int? _selectedApartmentId;
-  late int? _selectedBookingId;
+  /// `0` = create a new [RentalBookingModel] when saving the contract.
+  late int _selectedBookingId;
   late String _status;
   DateTime? _startDate;
   DateTime? _endDate;
@@ -41,9 +42,11 @@ class _ContractFormScreenState extends State<ContractFormScreen> {
       text: e != null ? e.totalAmount.toStringAsFixed(0) : '',
     );
     _notes = TextEditingController(text: e?.notes ?? '');
-    _selectedCustomerId = e?.customerId;
-    _selectedApartmentId = e?.apartmentId;
-    _selectedBookingId = e?.bookingId;
+    _selectedCustomerId = e?.customerId ??
+        (widget.customers.isNotEmpty ? widget.customers.first.customerId : null);
+    _selectedApartmentId = e?.apartmentId ??
+        (widget.apartments.isNotEmpty ? widget.apartments.first.apartmentId : null);
+    _selectedBookingId = e?.bookingId ?? 0;
     _status = e?.status ?? 'Active';
     _startDate = e?.startDate;
     _endDate = e?.endDate;
@@ -61,7 +64,6 @@ class _ContractFormScreenState extends State<ContractFormScreen> {
     final e = widget.existing;
     if (_selectedCustomerId == null ||
         _selectedApartmentId == null ||
-        _selectedBookingId == null ||
         _startDate == null ||
         _endDate == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -77,10 +79,34 @@ class _ContractFormScreenState extends State<ContractFormScreen> {
       endDate: _endDate!,
       totalAmount: totalAmount,
       status: _status,
-      bookingId: _selectedBookingId!,
+      bookingId: _selectedBookingId,
       notes: _notes.text.trim().isEmpty ? null : _notes.text.trim(),
     );
     Navigator.of(context).pop(model);
+  }
+
+  Widget _labeledDropdown<T>({
+    required String label,
+    required IconData icon,
+    required T? value,
+    required List<DropdownMenuItem<T>> items,
+    required ValueChanged<T?> onChanged,
+  }) {
+    return InputDecorator(
+      decoration: InputDecoration(
+        labelText: label,
+        prefixIcon: Icon(icon),
+        border: const OutlineInputBorder(),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<T>(
+          isExpanded: true,
+          value: value,
+          items: items,
+          onChanged: onChanged,
+        ),
+      ),
+    );
   }
 
   Future<void> _selectDate(BuildContext context, bool isStart) async {
@@ -106,65 +132,57 @@ class _ContractFormScreenState extends State<ContractFormScreen> {
     final isEdit = widget.existing != null;
     return Scaffold(
       appBar: AppBar(
-        title: Text(isEdit ? 'Edit Contract' : 'Add Contract'),
+        title: Text(isEdit ? 'Edit lease agreement' : 'New lease agreement'),
       ),
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
-          DropdownButtonFormField<int>(
+          _labeledDropdown<int>(
+            label: 'Customer',
+            icon: Icons.person_outline,
             value: _selectedCustomerId,
-            decoration: const InputDecoration(
-              labelText: 'Customer',
-              prefixIcon: Icon(Icons.person_outline),
-            ),
             items: widget.customers.map((customer) {
               return DropdownMenuItem(
                 value: customer.customerId,
                 child: Text(customer.name),
               );
             }).toList(),
-            onChanged: (value) {
-              setState(() {
-                _selectedCustomerId = value;
-              });
-            },
+            onChanged: (value) => setState(() => _selectedCustomerId = value),
           ),
           const SizedBox(height: 12),
-          DropdownButtonFormField<int>(
+          _labeledDropdown<int>(
+            label: 'Apartment',
+            icon: Icons.apartment_outlined,
             value: _selectedApartmentId,
-            decoration: const InputDecoration(
-              labelText: 'Apartment',
-              prefixIcon: Icon(Icons.apartment_outlined),
-            ),
             items: widget.apartments.map((apartment) {
               return DropdownMenuItem(
                 value: apartment.apartmentId,
                 child: Text(apartment.number ?? 'Unknown'),
               );
             }).toList(),
-            onChanged: (value) {
-              setState(() {
-                _selectedApartmentId = value;
-              });
-            },
+            onChanged: (value) => setState(() => _selectedApartmentId = value),
           ),
           const SizedBox(height: 12),
-          DropdownButtonFormField<int>(
+          _labeledDropdown<int>(
+            label: 'Booking',
+            icon: Icons.book_online_outlined,
             value: _selectedBookingId,
-            decoration: const InputDecoration(
-              labelText: 'Related Booking',
-              prefixIcon: Icon(Icons.book_online_outlined),
-            ),
-            items: widget.bookings.map((booking) {
-              return DropdownMenuItem(
-                value: booking.bookingId,
-                child: Text('Booking ${booking.bookingId}'),
-              );
-            }).toList(),
+            items: [
+              if (widget.existing == null)
+                const DropdownMenuItem(
+                  value: 0,
+                  child: Text('Create new booking'),
+                ),
+              ...widget.bookings.map((booking) {
+                return DropdownMenuItem(
+                  value: booking.bookingId,
+                  child: Text('Booking ${booking.bookingId}'),
+                );
+              }),
+            ],
             onChanged: (value) {
-              setState(() {
-                _selectedBookingId = value;
-              });
+              if (value == null) return;
+              setState(() => _selectedBookingId = value);
             },
           ),
           const SizedBox(height: 12),
@@ -209,12 +227,10 @@ class _ContractFormScreenState extends State<ContractFormScreen> {
             ),
           ),
           const SizedBox(height: 12),
-          DropdownButtonFormField<String>(
+          _labeledDropdown<String>(
+            label: 'Status',
+            icon: Icons.flag_outlined,
             value: _status,
-            decoration: const InputDecoration(
-              labelText: 'Status',
-              prefixIcon: Icon(Icons.flag_outlined),
-            ),
             items: ['Active', 'Expired', 'Terminated'].map((status) {
               return DropdownMenuItem(
                 value: status,
@@ -222,9 +238,8 @@ class _ContractFormScreenState extends State<ContractFormScreen> {
               );
             }).toList(),
             onChanged: (value) {
-              setState(() {
-                _status = value!;
-              });
+              if (value == null) return;
+              setState(() => _status = value);
             },
           ),
           const SizedBox(height: 12),
@@ -239,7 +254,7 @@ class _ContractFormScreenState extends State<ContractFormScreen> {
           const SizedBox(height: 20),
           FilledButton(
             onPressed: _save,
-            child: Text(isEdit ? 'Update Contract' : 'Add Contract'),
+            child: Text(isEdit ? 'Save agreement' : 'Create agreement'),
           ),
         ],
       ),

@@ -1,8 +1,9 @@
+/// [returnId] is null until checkout is recorded (installments / deposits).
 class RentalTransactionModel {
   const RentalTransactionModel({
     required this.transactionId,
     required this.bookingId,
-    required this.returnId,
+    this.returnId,
     required this.paidInitialTotalDueAmount,
     required this.actualTotalDueAmount,
     required this.totalRemaining,
@@ -14,7 +15,7 @@ class RentalTransactionModel {
 
   final int transactionId;
   final int bookingId;
-  final int returnId;
+  final int? returnId;
   final double paidInitialTotalDueAmount;
   final double actualTotalDueAmount;
   final double totalRemaining;
@@ -27,6 +28,7 @@ class RentalTransactionModel {
     int? transactionId,
     int? bookingId,
     int? returnId,
+    bool clearReturnId = false,
     double? paidInitialTotalDueAmount,
     double? actualTotalDueAmount,
     double? totalRemaining,
@@ -38,15 +40,15 @@ class RentalTransactionModel {
     return RentalTransactionModel(
       transactionId: transactionId ?? this.transactionId,
       bookingId: bookingId ?? this.bookingId,
-      returnId: returnId ?? this.returnId,
+      returnId: clearReturnId ? null : (returnId ?? this.returnId),
       paidInitialTotalDueAmount:
-          paidInitialTotalDueAmount ?? this.paidInitialTotalDueAmount,
+      paidInitialTotalDueAmount ?? this.paidInitialTotalDueAmount,
       actualTotalDueAmount: actualTotalDueAmount ?? this.actualTotalDueAmount,
       totalRemaining: totalRemaining ?? this.totalRemaining,
       totalRefundedAmount: totalRefundedAmount ?? this.totalRefundedAmount,
       transactionStatus: transactionStatus ?? this.transactionStatus,
       updatedTransactionDate:
-          updatedTransactionDate ?? this.updatedTransactionDate,
+      updatedTransactionDate ?? this.updatedTransactionDate,
       paymentDetails: paymentDetails ?? this.paymentDetails,
     );
   }

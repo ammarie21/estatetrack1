@@ -1,4 +1,4 @@
-package com.example.estatetrack1
+package com.bareeqq.estatetrack1
 
 import io.flutter.embedding.android.FlutterActivity
 

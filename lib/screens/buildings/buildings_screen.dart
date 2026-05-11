@@ -4,135 +4,57 @@ import 'package:estatetrack1/models/building_model.dart';
 import 'package:estatetrack1/models/apartment_model.dart';
 import 'package:estatetrack1/screens/buildings/building_form_screen.dart';
 import 'package:estatetrack1/screens/buildings/apartment_form_screen.dart';
+import 'package:estatetrack1/ui/app_components.dart';
 
-class BuildingsScreen extends StatefulWidget {
-  const BuildingsScreen({super.key});
+/// Buildings and apartments are owned by [HomeScreen] and passed in so every
+/// tab uses the same inventory (backend-ready single source of truth).
+class BuildingsScreen extends StatelessWidget {
+  const BuildingsScreen({
+    super.key,
+    required this.buildings,
+    required this.apartments,
+    required this.onBuildingsChanged,
+    required this.onApartmentsChanged,
+  });
 
-  @override
-  State<BuildingsScreen> createState() => _BuildingsScreenState();
-}
+  final List<BuildingModel> buildings;
+  final List<ApartmentModel> apartments;
+  final void Function(List<BuildingModel>) onBuildingsChanged;
+  final void Function(List<ApartmentModel>) onApartmentsChanged;
 
-class _BuildingsScreenState extends State<BuildingsScreen> {
-  late List<BuildingModel> _buildings;
-  late List<ApartmentModel> _apartments;
-
-  @override
-  void initState() {
-    super.initState();
-    _buildings = [
-      const BuildingModel(
-        buildingId: 1,
-        name: 'Tower A',
-        floorsCount: 5,
-        constructionYear: 2020,
-        totalApartments: 15,
-        location: 'Downtown',
-      ),
-      const BuildingModel(
-        buildingId: 2,
-        name: 'Tower B',
-        floorsCount: 8,
-        constructionYear: 2019,
-        totalApartments: 24,
-        location: 'Business District',
-      ),
-      const BuildingModel(
-        buildingId: 3,
-        name: 'Tower C',
-        floorsCount: 10,
-        constructionYear: 2021,
-        totalApartments: 30,
-        location: 'Residential Area',
-      ),
-    ];
-    _apartments = [
-      const ApartmentModel(
-        apartmentId: 1,
-        buildingId: 1,
-        typeId: 1,
-        sizeM2: 80,
-        rentPricePerMonth: 450,
-        rentPricePerDay: 15,
-        isAvailable: false,
-        bedrooms: 2,
-        bathrooms: 2,
-        hasBalcony: true,
-        furnished: true,
-        hasInternet: true,
-        parking: true,
-        elevator: true,
-        number: 'A-101',
-        location: 'Tower A, Floor 1',
-      ),
-      const ApartmentModel(
-        apartmentId: 2,
-        buildingId: 1,
-        typeId: 1,
-        sizeM2: 75,
-        rentPricePerMonth: 420,
-        rentPricePerDay: 14,
-        isAvailable: true,
-        bedrooms: 2,
-        bathrooms: 1,
-        hasBalcony: false,
-        furnished: true,
-        hasInternet: true,
-        parking: false,
-        elevator: true,
-        number: 'A-102',
-        location: 'Tower A, Floor 1',
-      ),
-      const ApartmentModel(
-        apartmentId: 3,
-        buildingId: 2,
-        typeId: 2,
-        sizeM2: 120,
-        rentPricePerMonth: 680,
-        rentPricePerDay: 22.67,
-        isAvailable: false,
-        bedrooms: 3,
-        bathrooms: 2,
-        hasBalcony: true,
-        furnished: true,
-        hasInternet: true,
-        parking: true,
-        elevator: true,
-        number: 'B-204',
-        location: 'Tower B, Floor 2',
-      ),
-    ];
+  static int _nextBuildingId(List<BuildingModel> list) {
+    if (list.isEmpty) return 1;
+    return list.map((e) => e.buildingId).reduce((a, b) => a > b ? a : b) + 1;
   }
 
-  int _nextBuildingId() {
-    if (_buildings.isEmpty) return 1;
-    return _buildings.map((e) => e.buildingId).reduce((a, b) => a > b ? a : b) + 1;
+  static int _nextApartmentId(List<ApartmentModel> list) {
+    if (list.isEmpty) return 1;
+    return list.map((e) => e.apartmentId).reduce((a, b) => a > b ? a : b) + 1;
   }
 
-  int _nextApartmentId() {
-    if (_apartments.isEmpty) return 1;
-    return _apartments.map((e) => e.apartmentId).reduce((a, b) => a > b ? a : b) + 1;
-  }
-
-  Future<void> _openBuildingForm({BuildingModel? existing}) async {
+  Future<void> _openBuildingForm(
+    BuildContext context, {
+    BuildingModel? existing,
+  }) async {
     final result = await Navigator.of(context).push<BuildingModel>(
       MaterialPageRoute(
         builder: (context) => BuildingFormScreen(existing: existing),
       ),
     );
-    if (!mounted || result == null) return;
+    if (!context.mounted || result == null) return;
 
-    setState(() {
-      if (existing != null) {
-        final i = _buildings.indexWhere((b) => b.buildingId == existing.buildingId);
-        if (i >= 0) {
-          _buildings[i] = result.copyWith(buildingId: existing.buildingId);
-        }
-      } else {
-        _buildings.add(result.copyWith(buildingId: _nextBuildingId()));
+    final next = List<BuildingModel>.from(buildings);
+    if (existing != null) {
+      final i = next.indexWhere((b) => b.buildingId == existing.buildingId);
+      if (i >= 0) {
+        next[i] = result.copyWith(buildingId: existing.buildingId);
       }
-    });
+    } else {
+      next.add(result.copyWith(buildingId: _nextBuildingId(buildings)));
+    }
+    onBuildingsChanged(next);
 
-    if (!mounted) return;
+    if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
@@ -142,7 +64,11 @@ class _BuildingsScreenState extends State<BuildingsScreen> {
     );
   }
 
-  Future<void> _openApartmentForm({ApartmentModel? existing, required int buildingId}) async {
+  Future<void> _openApartmentForm(
+    BuildContext context, {
+    ApartmentModel? existing,
+    required int buildingId,
+  }) async {
     final result = await Navigator.of(context).push<ApartmentModel>(
       MaterialPageRoute(
         builder: (context) => ApartmentFormScreen(
@@ -151,20 +77,20 @@ class _BuildingsScreenState extends State<BuildingsScreen> {
         ),
       ),
     );
-    if (!mounted || result == null) return;
+    if (!context.mounted || result == null) return;
 
-    setState(() {
-      if (existing != null) {
-        final i = _apartments.indexWhere((a) => a.apartmentId == existing.apartmentId);
-        if (i >= 0) {
-          _apartments[i] = result.copyWith(apartmentId: existing.apartmentId);
-        }
-      } else {
-        _apartments.add(result.copyWith(apartmentId: _nextApartmentId()));
+    final next = List<ApartmentModel>.from(apartments);
+    if (existing != null) {
+      final i = next.indexWhere((a) => a.apartmentId == existing.apartmentId);
+      if (i >= 0) {
+        next[i] = result.copyWith(apartmentId: existing.apartmentId);
       }
-    });
+    } else {
+      next.add(result.copyWith(apartmentId: _nextApartmentId(apartments)));
+    }
+    onApartmentsChanged(next);
 
-    if (!mounted) return;
+    if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
@@ -174,12 +100,12 @@ class _BuildingsScreenState extends State<BuildingsScreen> {
     );
   }
 
-  void _confirmDeleteBuilding(BuildingModel b) async {
+  Future<void> _confirmDeleteBuilding(BuildContext context, BuildingModel b) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Delete building?'),
-        content: Text('Remove ${b.name}?'),
+        content: Text('Remove ${b.name} and all its apartments in this list?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -192,18 +118,25 @@ class _BuildingsScreenState extends State<BuildingsScreen> {
         ],
       ),
     );
-    if (ok != true || !mounted) return;
+    if (ok != true || !context.mounted) return;
 
-    setState(() {
-      _buildings.removeWhere((e) => e.buildingId == b.buildingId);
-      _apartments.removeWhere((e) => e.buildingId == b.buildingId);
-    });
+    onBuildingsChanged(
+      buildings.where((e) => e.buildingId != b.buildingId).toList(),
+    );
+    onApartmentsChanged(
+      apartments.where((e) => e.buildingId != b.buildingId).toList(),
+    );
+
+    if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Building deleted')),
     );
   }
 
-  void _confirmDeleteApartment(ApartmentModel a) async {
+  Future<void> _confirmDeleteApartment(
+    BuildContext context,
+    ApartmentModel a,
+  ) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -221,11 +154,13 @@ class _BuildingsScreenState extends State<BuildingsScreen> {
         ],
       ),
     );
-    if (ok != true || !mounted) return;
+    if (ok != true || !context.mounted) return;
 
-    setState(() {
-      _apartments.removeWhere((e) => e.apartmentId == a.apartmentId);
-    });
+    onApartmentsChanged(
+      apartments.where((e) => e.apartmentId != a.apartmentId).toList(),
+    );
+
+    if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Apartment deleted')),
     );
@@ -235,11 +170,11 @@ class _BuildingsScreenState extends State<BuildingsScreen> {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
 
-    if (_buildings.isEmpty) {
+    if (buildings.isEmpty) {
       return Scaffold(
         floatingActionButton: FloatingActionButton(
           heroTag: 'fab_buildings',
-          onPressed: () => _openBuildingForm(),
+          onPressed: () => _openBuildingForm(context),
           child: const Icon(Icons.add),
         ),
         body: Center(
@@ -270,17 +205,18 @@ class _BuildingsScreenState extends State<BuildingsScreen> {
     return Scaffold(
       floatingActionButton: FloatingActionButton(
         heroTag: 'fab_buildings',
-        onPressed: () => _openBuildingForm(),
+        onPressed: () => _openBuildingForm(context),
         tooltip: 'Add Building',
         child: const Icon(Icons.add),
       ),
       body: ListView.separated(
         padding: const EdgeInsets.all(16),
-        itemCount: _buildings.length,
+        itemCount: buildings.length,
         separatorBuilder: (context, index) => const SizedBox(height: 16),
         itemBuilder: (context, index) {
-          final b = _buildings[index];
-          final buildingApartments = _apartments.where((a) => a.buildingId == b.buildingId).toList();
+          final b = buildings[index];
+          final buildingApartments =
+              apartments.where((a) => a.buildingId == b.buildingId).toList();
 
           return Card(
             child: Padding(
@@ -288,7 +224,6 @@ class _BuildingsScreenState extends State<BuildingsScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Building Header
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
@@ -321,23 +256,22 @@ class _BuildingsScreenState extends State<BuildingsScreen> {
                           ],
                         ),
                       ),
-                      PopupMenuButton(
-                        itemBuilder: (context) => [
-                          const PopupMenuItem(value: 'edit', child: Text('Edit')),
-                          const PopupMenuItem(value: 'delete', child: Text('Delete')),
+                      PopupMenuButton<String>(
+                        itemBuilder: (context) => const [
+                          PopupMenuItem(value: 'edit', child: Text('Edit')),
+                          PopupMenuItem(value: 'delete', child: Text('Delete')),
                         ],
                         onSelected: (value) {
                           if (value == 'edit') {
-                            _openBuildingForm(existing: b);
+                            _openBuildingForm(context, existing: b);
                           } else if (value == 'delete') {
-                            _confirmDeleteBuilding(b);
+                            _confirmDeleteBuilding(context, b);
                           }
                         },
                       ),
                     ],
                   ),
                   const Divider(height: 16),
-                  // Apartments List
                   if (buildingApartments.isEmpty)
                     Padding(
                       padding: const EdgeInsets.symmetric(vertical: 8),
@@ -363,11 +297,24 @@ class _BuildingsScreenState extends State<BuildingsScreen> {
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Text(
-                                      a.number ?? 'Unknown',
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.w500,
-                                      ),
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: Text(
+                                            a.number ?? 'Unknown',
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                        ),
+                                        AppStatusChip(
+                                          label:
+                                              a.isAvailable ? 'Vacant' : 'Occupied',
+                                          tone: a.isAvailable
+                                              ? AppChipTone.neutral
+                                              : AppChipTone.positive,
+                                        ),
+                                      ],
                                     ),
                                     Text(
                                       '${a.bedrooms} bed • ${a.bathrooms} bath • ${a.sizeM2} m²',
@@ -380,23 +327,30 @@ class _BuildingsScreenState extends State<BuildingsScreen> {
                                       r'$' '${a.rentPricePerMonth.toStringAsFixed(0)}/month',
                                       style: TextStyle(
                                         color: scheme.primary,
-                                        fontWeight: FontWeight.w500,
+                                        fontWeight: FontWeight.w600,
                                         fontSize: 12,
                                       ),
                                     ),
                                   ],
                                 ),
                               ),
-                              PopupMenuButton(
-                                itemBuilder: (context) => [
-                                  const PopupMenuItem(value: 'edit', child: Text('Edit')),
-                                  const PopupMenuItem(value: 'delete', child: Text('Delete')),
+                              PopupMenuButton<String>(
+                                itemBuilder: (context) => const [
+                                  PopupMenuItem(value: 'edit', child: Text('Edit')),
+                                  PopupMenuItem(
+                                    value: 'delete',
+                                    child: Text('Delete'),
+                                  ),
                                 ],
                                 onSelected: (value) {
                                   if (value == 'edit') {
-                                    _openApartmentForm(existing: a, buildingId: b.buildingId);
+                                    _openApartmentForm(
+                                      context,
+                                      existing: a,
+                                      buildingId: b.buildingId,
+                                    );
                                   } else if (value == 'delete') {
-                                    _confirmDeleteApartment(a);
+                                    _confirmDeleteApartment(context, a);
                                   }
                                 },
                               ),
@@ -405,13 +359,13 @@ class _BuildingsScreenState extends State<BuildingsScreen> {
                         );
                       },
                     ),
-                  // Add Apartment Button
                   Padding(
                     padding: const EdgeInsets.only(top: 8),
                     child: SizedBox(
                       width: double.infinity,
                       child: OutlinedButton.icon(
-                        onPressed: () => _openApartmentForm(buildingId: b.buildingId),
+                        onPressed: () =>
+                            _openApartmentForm(context, buildingId: b.buildingId),
                         icon: const Icon(Icons.add),
                         label: const Text('Add Apartment'),
                       ),
