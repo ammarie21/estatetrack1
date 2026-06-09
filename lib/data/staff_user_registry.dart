@@ -19,6 +19,9 @@ final List<UserModel> staffUsers = [
 
 /// Maps logged-in account to ERD staff user for [RentalBookingModel.userId].
 int staffUserIdForAccount(AccountModel account) {
+  final parsedId = int.tryParse(account.id);
+  if (parsedId != null && parsedId > 0) return parsedId;
+
   final phone = account.phone.trim();
   for (final u in staffUsers) {
     if (u.phone == phone) return u.userId;

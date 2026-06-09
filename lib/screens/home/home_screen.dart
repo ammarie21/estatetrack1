@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:estatetrack1/data/mock_auth_repository.dart';
+import 'package:estatetrack1/data/estate_api.dart';
 import 'package:estatetrack1/data/staff_user_registry.dart';
 import 'package:estatetrack1/models/account_model.dart';
 import 'package:estatetrack1/models/apartment_model.dart';
@@ -8,10 +8,13 @@ import 'package:estatetrack1/models/apartment_return_model.dart';
 import 'package:estatetrack1/models/contract_model.dart';
 import 'package:estatetrack1/models/customer_model.dart';
 import 'package:estatetrack1/models/expense_model.dart';
+import 'package:estatetrack1/models/maintenance_model.dart';
 import 'package:estatetrack1/models/rental_booking_model.dart';
 import 'package:estatetrack1/models/rental_transaction_model.dart';
 import 'package:estatetrack1/screens/admin/admin_accounts_screen.dart';
 import 'package:estatetrack1/screens/buildings/buildings_screen.dart';
+import 'package:estatetrack1/screens/calendar/calendar_screen.dart';
+import 'package:estatetrack1/screens/contracts/contract_form_screen.dart';
 import 'package:estatetrack1/screens/contracts/contracts_screen.dart';
 import 'package:estatetrack1/screens/customers/customers_screen.dart';
 import 'package:estatetrack1/screens/dashboard/dashboard_screen.dart';
@@ -30,8 +33,11 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   int _index = 0;
+  bool _showCalendar = false;
+  bool _isLoadingFromApi = true;
+  String? _apiError;
 
-  final List<CustomerModel> _customers = [
+  List<CustomerModel> _customers = [
     const CustomerModel(
       customerId: 1,
       name: 'Sara Al-Masri',
@@ -284,12 +290,91 @@ class _HomeScreenState extends State<HomeScreen> {
     ),
   ];
 
+  List<MaintenanceModel> _maintenance = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadFromApi();
+  }
+
+  Future<void> _loadFromApi() async {
+    setState(() {
+      _isLoadingFromApi = true;
+      _apiError = null;
+    });
+
+    try {
+      final snapshot = await EstateApi.instance.loadSnapshot();
+      if (!mounted) return;
+      setState(() {
+        _customers = List<CustomerModel>.from(snapshot.customers);
+        _buildings = snapshot.buildings;
+        _apartments = snapshot.apartments;
+        _bookings = snapshot.bookings;
+        _contracts = snapshot.contracts;
+        _returns = snapshot.returns;
+        _rentalTransactions = snapshot.rentalTransactions;
+        _expenses = snapshot.expenses;
+        _maintenance = snapshot.maintenance;
+        _isLoadingFromApi = false;
+      });
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _apiError = e.message;
+        _isLoadingFromApi = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _apiError = e.toString();
+        _isLoadingFromApi = false;
+      });
+    }
+  }
+
   void _logout() {
-    MockAuthRepository.instance.logout();
+    EstateApi.instance.logout();
     Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute<void>(builder: (context) => const LoginScreen()),
       (route) => false,
     );
+  }
+
+  Future<void> _editContractFromCalendar(ContractModel existing) async {
+    final result = await Navigator.of(context).push<ContractModel>(
+      MaterialPageRoute(
+        builder: (context) => ContractFormScreen(
+          existing: existing,
+          customers: _customers,
+          apartments: _apartments,
+          bookings: _bookings,
+        ),
+      ),
+    );
+    if (!mounted || result == null) return;
+
+    setState(() {
+      final i = _contracts.indexWhere(
+        (c) => c.contractId == existing.contractId,
+      );
+      if (i >= 0) {
+        _contracts[i] = result.copyWith(contractId: existing.contractId);
+      }
+    });
+  }
+
+  void _selectDrawerDestination(int? index) {
+    Navigator.of(context).pop();
+    setState(() {
+      if (index == null) {
+        _showCalendar = true;
+      } else {
+        _showCalendar = false;
+        _index = index;
+      }
+    });
   }
 
   @override
@@ -301,21 +386,12 @@ class _HomeScreenState extends State<HomeScreen> {
     final shellHints = <({String title, String hint})>[
       (
         title: 'Dashboard',
-        hint: 'Apartment · Customer · Booking · Transaction snapshot'
+        hint: 'Apartment · Customer · Booking · Transaction snapshot',
       ),
       (title: 'Customers', hint: 'Customer records'),
-      (
-        title: 'Buildings',
-        hint: 'Building · Apartment inventory'
-      ),
-      (
-        title: 'Rentals',
-        hint: 'Rental Booking · Agreement · Apartment Return'
-      ),
-      (
-        title: 'Payments',
-        hint: 'Rental Transaction · Expenses'
-      ),
+      (title: 'Buildings', hint: 'Building · Apartment inventory'),
+      (title: 'Rentals', hint: 'Rental Booking · Agreement · Apartment Return'),
+      (title: 'Payments', hint: 'Rental Transaction · Expenses'),
       (title: 'Reports', hint: 'Revenue & occupancy analytics'),
       if (isAdmin) (title: 'Accounts', hint: 'Staff sign-in · Roles'),
     ];
@@ -385,7 +461,7 @@ class _HomeScreenState extends State<HomeScreen> {
         expenses: _expenses,
         apartments: _apartments,
         customers: _customers,
-        maintenance: const [],
+        maintenance: _maintenance,
       ),
       if (isAdmin) const AdminAccountsScreen(),
     ];
@@ -407,8 +483,8 @@ class _HomeScreenState extends State<HomeScreen> {
         label: 'Buildings',
       ),
       const BottomNavigationBarItem(
-        icon: Icon(Icons.calendar_month_outlined),
-        activeIcon: Icon(Icons.calendar_month),
+        icon: Icon(Icons.handshake_outlined),
+        activeIcon: Icon(Icons.handshake),
         label: 'Rentals',
       ),
       const BottomNavigationBarItem(
@@ -429,19 +505,104 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
     ];
 
+    const calendarHint = (
+      title: 'Calendar',
+      hint: 'Lease start · end · return · payment dates',
+    );
+
     return Scaffold(
+      drawer: NavigationDrawer(
+        selectedIndex: _showCalendar ? shellHints.length : _index,
+        onDestinationSelected: (i) {
+          if (i == shellHints.length) {
+            _selectDrawerDestination(null);
+          } else {
+            _selectDrawerDestination(i);
+          }
+        },
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(28, 28, 16, 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'EstateTrack',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  widget.account.name,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const NavigationDrawerDestination(
+            icon: Icon(Icons.dashboard_outlined),
+            selectedIcon: Icon(Icons.dashboard),
+            label: Text('Dashboard'),
+          ),
+          const NavigationDrawerDestination(
+            icon: Icon(Icons.people_outline),
+            selectedIcon: Icon(Icons.people),
+            label: Text('Customers'),
+          ),
+          const NavigationDrawerDestination(
+            icon: Icon(Icons.apartment_outlined),
+            selectedIcon: Icon(Icons.apartment),
+            label: Text('Buildings'),
+          ),
+          const NavigationDrawerDestination(
+            icon: Icon(Icons.handshake_outlined),
+            selectedIcon: Icon(Icons.handshake),
+            label: Text('Rentals'),
+          ),
+          const NavigationDrawerDestination(
+            icon: Icon(Icons.account_balance_wallet_outlined),
+            selectedIcon: Icon(Icons.account_balance_wallet),
+            label: Text('Payments'),
+          ),
+          const NavigationDrawerDestination(
+            icon: Icon(Icons.bar_chart_outlined),
+            selectedIcon: Icon(Icons.bar_chart),
+            label: Text('Reports'),
+          ),
+          if (isAdmin)
+            const NavigationDrawerDestination(
+              icon: Icon(Icons.manage_accounts_outlined),
+              selectedIcon: Icon(Icons.manage_accounts),
+              label: Text('Accounts'),
+            ),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Divider(),
+          ),
+          const NavigationDrawerDestination(
+            icon: Icon(Icons.calendar_month_outlined),
+            selectedIcon: Icon(Icons.calendar_month),
+            label: Text('Calendar'),
+          ),
+        ],
+      ),
       appBar: AppBar(
         title: AppToolbarTitle(
-          title: shellHints[_index].title,
-          erdHint: shellHints[_index].hint,
+          title: _showCalendar ? calendarHint.title : shellHints[_index].title,
+          erdHint: _showCalendar ? calendarHint.hint : shellHints[_index].hint,
         ),
         actions: [
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 4),
             child: Center(
               child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
                 decoration: BoxDecoration(
                   color: isAdmin
                       ? scheme.primaryContainer
@@ -477,19 +638,77 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
           IconButton(
+            icon: const Icon(Icons.refresh_rounded),
+            tooltip: 'Refresh API data',
+            onPressed: _isLoadingFromApi ? null : _loadFromApi,
+          ),
+          IconButton(
             icon: const Icon(Icons.logout_rounded),
             tooltip: 'Logout',
             onPressed: _logout,
           ),
         ],
       ),
-      body: IndexedStack(
-        index: _index,
-        children: screens,
+      body: Stack(
+        children: [
+          Positioned.fill(
+            child: _showCalendar
+                ? CalendarScreen(
+                    contracts: _contracts,
+                    returns: _returns,
+                    rentalTransactions: _rentalTransactions,
+                    customers: _customers,
+                    apartments: _apartments,
+                    onEditContract: _editContractFromCalendar,
+                  )
+                : IndexedStack(index: _index, children: screens),
+          ),
+          if (_isLoadingFromApi)
+            const Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: LinearProgressIndicator(),
+            ),
+          if (_apiError != null)
+            Positioned(
+              left: 12,
+              right: 12,
+              bottom: 12,
+              child: Card(
+                color: scheme.errorContainer,
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.cloud_off_rounded,
+                        color: scheme.onErrorContainer,
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          'API load failed: $_apiError',
+                          style: TextStyle(color: scheme.onErrorContainer),
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: _loadFromApi,
+                        child: const Text('Retry'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _index,
-        onTap: (i) => setState(() => _index = i),
+        onTap: (i) => setState(() {
+          _showCalendar = false;
+          _index = i;
+        }),
         type: BottomNavigationBarType.fixed,
         items: navItems,
       ),

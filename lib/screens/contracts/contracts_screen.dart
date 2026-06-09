@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import 'package:estatetrack1/data/estate_api.dart';
 import 'package:estatetrack1/models/apartment_model.dart';
 import 'package:estatetrack1/models/apartment_return_model.dart';
 import 'package:estatetrack1/models/contract_model.dart';
@@ -61,22 +62,12 @@ class _ContractsScreenState extends State<ContractsScreen>
     super.dispose();
   }
 
-  int _nextContractId() {
-    if (widget.contracts.isEmpty) return 1;
-    return widget.contracts
-            .map((e) => e.contractId)
-            .reduce((a, b) => a > b ? a : b) +
-        1;
-  }
-
-  int _nextReturnId() {
-    if (widget.returns.isEmpty) return 1;
-    return widget.returns.map((e) => e.returnId).reduce((a, b) => a > b ? a : b) + 1;
-  }
-
   int _nextBookingId() {
     if (widget.bookings.isEmpty) return 1;
-    return widget.bookings.map((e) => e.bookingId).reduce((a, b) => a > b ? a : b) + 1;
+    return widget.bookings
+            .map((e) => e.bookingId)
+            .reduce((a, b) => a > b ? a : b) +
+        1;
   }
 
   int _estimatedMonths(DateTime start, DateTime end) {
@@ -95,7 +86,10 @@ class _ContractsScreenState extends State<ContractsScreen>
     widget.onApartmentsChanged(next);
   }
 
-  RentalBookingModel _createBookingFromContract(ContractModel c, int bookingId) {
+  RentalBookingModel _createBookingFromContract(
+    ContractModel c,
+    int bookingId,
+  ) {
     final months = _estimatedMonths(c.startDate, c.endDate);
     final periodFee = c.totalAmount / months;
     return RentalBookingModel(
@@ -112,26 +106,65 @@ class _ContractsScreenState extends State<ContractsScreen>
     );
   }
 
-  void _applyContract(ContractModel raw, ContractModel? existing) {
-    var bookings = List<RentalBookingModel>.from(widget.bookings);
-    ContractModel contract = raw;
+  ContractModel _contractFromBooking(
+    RentalBookingModel b, {
+    String status = 'Active',
+  }) {
+    return ContractModel(
+      contractId: b.bookingId,
+      customerId: b.customerId,
+      apartmentId: b.apartmentId,
+      startDate: b.startDate,
+      endDate: b.endDate,
+      totalAmount: b.initialTotalDueAmount,
+      status: status,
+      bookingId: b.bookingId,
+      notes: b.initialCheckNotes,
+    );
+  }
 
-    if (raw.bookingId == 0) {
-      final newBid = _nextBookingId();
-      final nb = _createBookingFromContract(raw, newBid);
-      bookings.add(nb);
-      contract = raw.copyWith(bookingId: newBid);
-      widget.onBookingsChanged(bookings);
+  Future<void> _applyContract(
+    ContractModel raw,
+    ContractModel? existing,
+  ) async {
+    var bookings = List<RentalBookingModel>.from(widget.bookings);
+    final bookingId = raw.bookingId == 0
+        ? _nextBookingId()
+        : (existing?.bookingId ?? raw.bookingId);
+    final bookingToSave = _createBookingFromContract(raw, bookingId);
+
+    final savedBooking = existing == null && raw.bookingId == 0
+        ? await EstateApi.instance.createBooking(bookingToSave)
+        : await EstateApi.instance.updateBooking(bookingToSave);
+
+    final bookingIndex = bookings.indexWhere(
+      (b) => b.bookingId == savedBooking.bookingId,
+    );
+    if (bookingIndex >= 0) {
+      bookings[bookingIndex] = savedBooking;
+    } else {
+      bookings.add(savedBooking);
     }
+    widget.onBookingsChanged(bookings);
 
     final contracts = List<ContractModel>.from(widget.contracts);
+    final contract = _contractFromBooking(savedBooking, status: raw.status);
     if (existing != null) {
-      final i = contracts.indexWhere((x) => x.contractId == existing.contractId);
+      final i = contracts.indexWhere(
+        (x) => x.contractId == existing.contractId,
+      );
       if (i >= 0) {
-        contracts[i] = contract.copyWith(contractId: existing.contractId);
+        contracts[i] = contract;
       }
     } else {
-      contracts.add(contract.copyWith(contractId: _nextContractId()));
+      final i = contracts.indexWhere(
+        (x) => x.bookingId == savedBooking.bookingId,
+      );
+      if (i >= 0) {
+        contracts[i] = contract;
+      } else {
+        contracts.add(contract);
+      }
     }
     widget.onContractsChanged(contracts);
 
@@ -140,19 +173,29 @@ class _ContractsScreenState extends State<ContractsScreen>
     }
   }
 
-  void _applyReturn(ApartmentReturnModel raw, ApartmentReturnModel? existing) {
+  Future<void> _applyReturn(
+    ApartmentReturnModel raw,
+    ApartmentReturnModel? existing,
+  ) async {
+    final saved = existing == null
+        ? await EstateApi.instance.createReturn(raw, userId: widget.staffUserId)
+        : await EstateApi.instance.updateReturn(
+            raw.copyWith(returnId: existing.returnId),
+            userId: widget.staffUserId,
+          );
+
     final returns = List<ApartmentReturnModel>.from(widget.returns);
     if (existing != null) {
       final i = returns.indexWhere((x) => x.returnId == existing.returnId);
       if (i >= 0) {
-        returns[i] = raw.copyWith(returnId: existing.returnId);
+        returns[i] = saved.copyWith(actualRentalDays: raw.actualRentalDays);
       }
     } else {
-      returns.add(raw.copyWith(returnId: _nextReturnId()));
+      returns.add(saved.copyWith(actualRentalDays: raw.actualRentalDays));
     }
     widget.onReturnsChanged(returns);
 
-    final bid = raw.bookingId;
+    final bid = saved.bookingId;
     if (bid != null) {
       RentalBookingModel? b;
       for (final x in widget.bookings) {
@@ -190,7 +233,15 @@ class _ContractsScreenState extends State<ContractsScreen>
     );
     if (!mounted || result == null) return;
 
-    _applyContract(result, existing);
+    try {
+      await _applyContract(result, existing);
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Agreement save failed: ${e.message}')),
+      );
+      return;
+    }
 
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -224,14 +275,28 @@ class _ContractsScreenState extends State<ContractsScreen>
     );
     if (ok != true || !mounted) return;
 
-    final contracts =
-        widget.contracts.where((e) => e.contractId != c.contractId).toList();
-    widget.onContractsChanged(contracts);
+    try {
+      await EstateApi.instance.deleteBooking(c.bookingId);
+      final contracts = widget.contracts
+          .where((e) => e.contractId != c.contractId)
+          .toList();
+      final bookings = widget.bookings
+          .where((e) => e.bookingId != c.bookingId)
+          .toList();
+      widget.onContractsChanged(contracts);
+      widget.onBookingsChanged(bookings);
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Agreement delete failed: ${e.message}')),
+      );
+      return;
+    }
 
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Agreement removed')),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Agreement removed')));
   }
 
   Future<void> _openReturnForm({ApartmentReturnModel? existing}) async {
@@ -247,7 +312,15 @@ class _ContractsScreenState extends State<ContractsScreen>
     );
     if (!mounted || result == null) return;
 
-    _applyReturn(result, existing);
+    try {
+      await _applyReturn(result, existing);
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Return save failed: ${e.message}')),
+      );
+      return;
+    }
 
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -277,13 +350,24 @@ class _ContractsScreenState extends State<ContractsScreen>
     );
     if (ok != true || !mounted) return;
 
-    final returns = widget.returns.where((e) => e.returnId != r.returnId).toList();
-    widget.onReturnsChanged(returns);
+    try {
+      await EstateApi.instance.deleteReturn(r.returnId);
+      final returns = widget.returns
+          .where((e) => e.returnId != r.returnId)
+          .toList();
+      widget.onReturnsChanged(returns);
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Return delete failed: ${e.message}')),
+      );
+      return;
+    }
 
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Return deleted')),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Return deleted')));
   }
 
   String _getCustomerName(int customerId) {
@@ -307,29 +391,13 @@ class _ContractsScreenState extends State<ContractsScreen>
     return 'Booking ${r.bookingId}';
   }
 
+  String _flowBannerText() => _tabController.index == 1
+      ? 'Apartment Return captures checkout: link to the booking’s agreement, then finalize amounts in Rental Transactions.'
+      : 'Agreements mirror your Rental Booking + lease totals. Each row ties Customer → Apartment → Booking ID.';
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final empty = widget.contracts.isEmpty && widget.returns.isEmpty;
-
-    if (empty) {
-      return Scaffold(
-        floatingActionButton: FloatingActionButton.extended(
-          heroTag: 'fab_contracts',
-          onPressed: () => _openForm(),
-          icon: const Icon(Icons.add_rounded),
-          label: const Text('New agreement'),
-        ),
-        body: AppEmptyState(
-          icon: Icons.handshake_outlined,
-          title: 'Start a rental booking',
-          message:
-              'Add a lease agreement linked to a Rental Booking (create new or '
-              'existing). Then record an Apartment Return at checkout, and Rental '
-              'Transactions under Payments.',
-        ),
-      );
-    }
 
     return Scaffold(
       floatingActionButton: AnimatedBuilder(
@@ -353,12 +421,7 @@ class _ContractsScreenState extends State<ContractsScreen>
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          AppFlowBanner(
-            icon: Icons.schema_outlined,
-            text: _tabController.index == 0
-                ? 'Agreements mirror your Rental Booking + lease totals. Each row ties Customer → Apartment → Booking ID.'
-                : 'Apartment Return captures checkout: link to the booking’s agreement, then finalize amounts in Rental Transactions.',
-          ),
+          AppFlowBanner(icon: Icons.schema_outlined, text: _flowBannerText()),
           Material(
             color: Theme.of(context).colorScheme.surface,
             child: TabBar(
@@ -372,10 +435,7 @@ class _ContractsScreenState extends State<ContractsScreen>
           Expanded(
             child: TabBarView(
               controller: _tabController,
-              children: [
-                _buildContractsTab(scheme),
-                _buildReturnsTab(scheme),
-              ],
+              children: [_buildContractsTab(scheme), _buildReturnsTab(scheme)],
             ),
           ),
         ],
@@ -403,7 +463,10 @@ class _ContractsScreenState extends State<ContractsScreen>
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             child: ListTile(
-              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 4,
+              ),
               title: Row(
                 children: [
                   Expanded(
@@ -435,7 +498,8 @@ class _ContractsScreenState extends State<ContractsScreen>
                     ),
                     const SizedBox(height: 6),
                     Text(
-                      r'$' '${c.totalAmount.toStringAsFixed(0)} estimated total',
+                      r'$'
+                      '${c.totalAmount.toStringAsFixed(0)} estimated total',
                       style: TextStyle(
                         color: scheme.primary,
                         fontWeight: FontWeight.w600,
@@ -488,7 +552,10 @@ class _ContractsScreenState extends State<ContractsScreen>
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             child: ListTile(
-              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 4,
+              ),
               title: Row(
                 children: [
                   Expanded(
@@ -522,7 +589,8 @@ class _ContractsScreenState extends State<ContractsScreen>
                       ),
                     ),
                     Text(
-                      r'$' '${r.actualTotalDueAmount.toStringAsFixed(0)} due',
+                      r'$'
+                      '${r.actualTotalDueAmount.toStringAsFixed(0)} due',
                       style: TextStyle(
                         color: scheme.primary,
                         fontWeight: FontWeight.w500,

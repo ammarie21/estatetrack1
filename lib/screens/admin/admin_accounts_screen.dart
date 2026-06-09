@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
-import 'package:estatetrack1/data/mock_auth_repository.dart';
-import 'package:estatetrack1/models/account_model.dart';
+import 'package:estatetrack1/data/estate_api.dart';
+import 'package:estatetrack1/models/user_model.dart';
 
 class AdminAccountsScreen extends StatefulWidget {
   const AdminAccountsScreen({super.key});
@@ -12,6 +12,15 @@ class AdminAccountsScreen extends StatefulWidget {
 
 class _AdminAccountsScreenState extends State<AdminAccountsScreen> {
   final _searchController = TextEditingController();
+  List<UserModel> _users = [];
+  bool _loading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUsers();
+  }
 
   @override
   void dispose() {
@@ -19,29 +28,50 @@ class _AdminAccountsScreenState extends State<AdminAccountsScreen> {
     super.dispose();
   }
 
-  List<AccountModel> get _filteredAccounts {
+  Future<void> _loadUsers() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final users = await EstateApi.instance.getUsers();
+      if (!mounted) return;
+      setState(() {
+        _users = users;
+        _loading = false;
+      });
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.message;
+        _loading = false;
+      });
+    }
+  }
+
+  List<UserModel> get _filteredUsers {
     final query = _searchController.text.trim().toLowerCase();
-    final accounts = MockAuthRepository.instance.accounts;
-    if (query.isEmpty) return accounts;
-    return accounts
+    if (query.isEmpty) return _users;
+    return _users
         .where(
-          (a) =>
-      a.name.toLowerCase().contains(query) ||
-          a.email.toLowerCase().contains(query) ||
-          a.phone.contains(query) ||
-          a.role.toLowerCase().contains(query),
-    )
+          (u) =>
+              u.userId.toString().contains(query) ||
+              u.name.toLowerCase().contains(query) ||
+              u.phone.contains(query),
+        )
         .toList();
   }
 
-  Future<void> _showAccountEditor({AccountModel? account}) async {
+  int _nextUserId() {
+    if (_users.isEmpty) return 1;
+    return _users.map((e) => e.userId).reduce((a, b) => a > b ? a : b) + 1;
+  }
+
+  Future<void> _showAccountEditor({UserModel? user}) async {
     final formKey = GlobalKey<FormState>();
-    final nameController = TextEditingController(text: account?.name ?? '');
-    final emailController = TextEditingController(text: account?.email ?? '');
-    final phoneController = TextEditingController(text: account?.phone ?? '');
+    final nameController = TextEditingController(text: user?.name ?? '');
+    final phoneController = TextEditingController(text: user?.phone ?? '');
     final passwordController = TextEditingController();
-    var role = account?.role ?? 'User';
-    var isActive = account?.isActive ?? true;
 
     await showModalBottomSheet<void>(
       context: context,
@@ -63,7 +93,7 @@ class _AdminAccountsScreenState extends State<AdminAccountsScreen> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
-                        account == null ? 'Create Account' : 'Edit Account',
+                        user == null ? 'Create User' : 'Edit User',
                         style: Theme.of(context).textTheme.titleLarge,
                       ),
                       const SizedBox(height: 12),
@@ -71,92 +101,73 @@ class _AdminAccountsScreenState extends State<AdminAccountsScreen> {
                         controller: nameController,
                         decoration: const InputDecoration(labelText: 'Name'),
                         validator: (v) =>
-                        (v == null || v.trim().isEmpty) ? 'Required' : null,
-                      ),
-                      const SizedBox(height: 10),
-                      TextFormField(
-                        controller: emailController,
-                        decoration: const InputDecoration(labelText: 'Email'),
-                        validator: (v) =>
-                        (v == null || !v.contains('@')) ? 'Invalid email' : null,
+                            (v == null || v.trim().isEmpty) ? 'Required' : null,
                       ),
                       const SizedBox(height: 10),
                       TextFormField(
                         controller: phoneController,
                         decoration: const InputDecoration(labelText: 'Phone'),
                         validator: (v) =>
-                        (v == null || v.trim().isEmpty) ? 'Required' : null,
+                            (v == null || v.trim().isEmpty) ? 'Required' : null,
                       ),
                       const SizedBox(height: 10),
-                      DropdownButtonFormField<String>(
-                        initialValue: role,
-                        decoration: const InputDecoration(labelText: 'Role'),
-                        items: const [
-                          DropdownMenuItem(value: 'User', child: Text('User')),
-                          DropdownMenuItem(value: 'Admin', child: Text('Admin')),
-                        ],
-                        onChanged: (value) {
-                          setModalState(() => role = value ?? 'User');
+                      TextFormField(
+                        controller: passwordController,
+                        obscureText: true,
+                        decoration: InputDecoration(
+                          labelText: user == null
+                              ? 'Initial Password'
+                              : 'New Password (leave blank to keep current)',
+                        ),
+                        validator: (v) {
+                          if (user == null && (v == null || v.isEmpty)) {
+                            return 'Required';
+                          }
+                          return null;
                         },
                       ),
-                      const SizedBox(height: 10),
-                      if (account == null)
-                        TextFormField(
-                          controller: passwordController,
-                          obscureText: true,
-                          decoration:
-                          const InputDecoration(labelText: 'Initial Password'),
-                          validator: (v) {
-                            if (v == null || v.isEmpty) return 'Required';
-                            return MockAuthRepository.instance
-                                .validatePasswordRules(v);
-                          },
-                        ),
-                      if (account != null)
-                        SwitchListTile(
-                          value: isActive,
-                          onChanged: (value) =>
-                              setModalState(() => isActive = value),
-                          title: const Text('Active'),
-                        ),
                       const SizedBox(height: 16),
                       SizedBox(
                         width: double.infinity,
                         child: FilledButton(
-                          onPressed: () {
+                          onPressed: () async {
                             if (!formKey.currentState!.validate()) {
                               return;
                             }
-                            String? error;
-                            if (account == null) {
-                              error = MockAuthRepository.instance.createAccount(
-                                name: nameController.text,
-                                email: emailController.text,
-                                phone: phoneController.text,
-                                password: passwordController.text,
-                                role: role,
+                            try {
+                              final model = UserModel(
+                                userId: user?.userId ?? _nextUserId(),
+                                name: nameController.text.trim(),
+                                phone: phoneController.text.trim(),
+                                password: passwordController.text.isEmpty
+                                    ? (user?.password ?? '')
+                                    : passwordController.text,
                               );
-                            } else {
-                              error = MockAuthRepository.instance.updateAccount(
-                                id: account.id,
-                                name: nameController.text,
-                                email: emailController.text,
-                                phone: phoneController.text,
-                                role: role,
-                                isActive: isActive,
+                              final saved = user == null
+                                  ? await EstateApi.instance.createUser(model)
+                                  : await EstateApi.instance.updateUser(model);
+                              if (!mounted) return;
+                              setState(() {
+                                if (user == null) {
+                                  _users.add(saved);
+                                } else {
+                                  final i = _users.indexWhere(
+                                    (x) => x.userId == user.userId,
+                                  );
+                                  if (i >= 0) _users[i] = saved;
+                                }
+                              });
+                              if (context.mounted) Navigator.of(context).pop();
+                            } on ApiException catch (e) {
+                              if (!context.mounted) return;
+                              ScaffoldMessenger.of(this.context).showSnackBar(
+                                SnackBar(content: Text(e.message)),
                               );
                             }
-                            if (error != null) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(content: Text(error)),
-                              );
-                              return;
-                            }
-                            Navigator.of(context).pop();
-                            setState(() {});
                           },
-                          child:
-                          Text(account == null ? 'Create Account' : 'Save Changes'),
+                          child: Text(
+                            user == null ? 'Create User' : 'Save Changes',
+                          ),
                         ),
                       ),
                     ],
@@ -170,12 +181,11 @@ class _AdminAccountsScreenState extends State<AdminAccountsScreen> {
     );
 
     nameController.dispose();
-    emailController.dispose();
     phoneController.dispose();
     passwordController.dispose();
   }
 
-  Future<void> _resetPassword(AccountModel account) async {
+  Future<void> _resetPassword(UserModel user) async {
     final controller = TextEditingController();
     final formKey = GlobalKey<FormState>();
 
@@ -192,7 +202,7 @@ class _AdminAccountsScreenState extends State<AdminAccountsScreen> {
               decoration: const InputDecoration(labelText: 'New Password'),
               validator: (value) {
                 if (value == null || value.isEmpty) return 'Required';
-                return MockAuthRepository.instance.validatePasswordRules(value);
+                return null;
               },
             ),
           ),
@@ -215,20 +225,23 @@ class _AdminAccountsScreenState extends State<AdminAccountsScreen> {
     );
 
     if (shouldSave == true) {
-      final error = MockAuthRepository.instance.resetPassword(
-        id: account.id,
-        newPassword: controller.text,
-      );
-      if (!mounted) {
-        controller.dispose();
-        return;
-      }
-      if (error != null) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error)));
-      } else {
+      try {
+        final saved = await EstateApi.instance.updateUser(
+          user.copyWith(password: controller.text),
+        );
+        if (!mounted) return;
+        setState(() {
+          final i = _users.indexWhere((x) => x.userId == user.userId);
+          if (i >= 0) _users[i] = saved;
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Password reset successfully.')),
         );
+      } on ApiException catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(e.message)));
       }
     }
     controller.dispose();
@@ -236,7 +249,22 @@ class _AdminAccountsScreenState extends State<AdminAccountsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final accounts = _filteredAccounts;
+    final users = _filteredUsers;
+    if (_loading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_error != null) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(_error!),
+            const SizedBox(height: 12),
+            FilledButton(onPressed: _loadUsers, child: const Text('Retry')),
+          ],
+        ),
+      );
+    }
     return Column(
       children: [
         Padding(
@@ -264,44 +292,36 @@ class _AdminAccountsScreenState extends State<AdminAccountsScreen> {
         ),
         Expanded(
           child: ListView.separated(
-            itemCount: accounts.length,
+            itemCount: users.length,
             separatorBuilder: (_, index) => const Divider(height: 0),
             itemBuilder: (context, index) {
-              final account = accounts[index];
+              final user = users[index];
               return ListTile(
-                leading: CircleAvatar(
-                  child: Text(account.role == 'Admin' ? 'A' : 'U'),
-                ),
-                title: Text(account.name),
+                leading: CircleAvatar(child: Text(user.userId.toString())),
+                title: Text(user.name),
                 subtitle: Text(
-                  '${account.email}\n${account.phone} - ${account.role} - ${account.isActive ? 'Active' : 'Inactive'}',
+                  'Phone: ${user.phone}\nBackend UserID: ${user.userId}',
                 ),
                 isThreeLine: true,
                 trailing: PopupMenuButton<String>(
-                  onSelected: (value) {
+                  onSelected: (value) async {
                     if (value == 'edit') {
-                      _showAccountEditor(account: account);
+                      _showAccountEditor(user: user);
                     } else if (value == 'reset') {
-                      _resetPassword(account);
-                    } else if (value == 'toggle') {
-                      final error = MockAuthRepository.instance.updateAccount(
-                        id: account.id,
-                        name: account.name,
-                        email: account.email,
-                        phone: account.phone,
-                        role: account.role,
-                        isActive: !account.isActive,
-                      );
-                      if (error != null) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text(error)),
-                        );
-                      } else {
-                        setState(() {});
-                      }
+                      _resetPassword(user);
                     } else if (value == 'delete') {
-                      MockAuthRepository.instance.deleteAccount(account.id);
-                      setState(() {});
+                      try {
+                        await EstateApi.instance.deleteUser(user.userId);
+                        if (!mounted) return;
+                        setState(() {
+                          _users.removeWhere((x) => x.userId == user.userId);
+                        });
+                      } on ApiException catch (e) {
+                        if (!mounted) return;
+                        ScaffoldMessenger.of(
+                          this.context,
+                        ).showSnackBar(SnackBar(content: Text(e.message)));
+                      }
                     }
                   },
                   itemBuilder: (_) => [
@@ -309,10 +329,6 @@ class _AdminAccountsScreenState extends State<AdminAccountsScreen> {
                     const PopupMenuItem(
                       value: 'reset',
                       child: Text('Reset Password'),
-                    ),
-                    PopupMenuItem(
-                      value: 'toggle',
-                      child: Text(account.isActive ? 'Deactivate' : 'Activate'),
                     ),
                     const PopupMenuItem(value: 'delete', child: Text('Delete')),
                   ],

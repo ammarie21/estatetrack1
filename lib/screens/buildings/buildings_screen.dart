@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:estatetrack1/data/estate_api.dart';
 import 'package:estatetrack1/models/building_model.dart';
 import 'package:estatetrack1/models/apartment_model.dart';
 import 'package:estatetrack1/screens/buildings/building_form_screen.dart';
@@ -43,25 +44,40 @@ class BuildingsScreen extends StatelessWidget {
     );
     if (!context.mounted || result == null) return;
 
-    final next = List<BuildingModel>.from(buildings);
-    if (existing != null) {
-      final i = next.indexWhere((b) => b.buildingId == existing.buildingId);
-      if (i >= 0) {
-        next[i] = result.copyWith(buildingId: existing.buildingId);
-      }
-    } else {
-      next.add(result.copyWith(buildingId: _nextBuildingId(buildings)));
-    }
-    onBuildingsChanged(next);
+    try {
+      final saved = existing != null
+          ? await EstateApi.instance.updateBuilding(
+              result.copyWith(buildingId: existing.buildingId),
+            )
+          : await EstateApi.instance.createBuilding(
+              result.copyWith(buildingId: _nextBuildingId(buildings)),
+            );
 
-    if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          existing != null ? 'Building updated' : 'Building added',
+      final next = List<BuildingModel>.from(buildings);
+      if (existing != null) {
+        final i = next.indexWhere((b) => b.buildingId == existing.buildingId);
+        if (i >= 0) {
+          next[i] = saved;
+        }
+      } else {
+        next.add(saved);
+      }
+      onBuildingsChanged(next);
+
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            existing != null ? 'Building updated' : 'Building added',
+          ),
         ),
-      ),
-    );
+      );
+    } on ApiException catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Building save failed: ${e.message}')),
+      );
+    }
   }
 
   Future<void> _openApartmentForm(
@@ -71,36 +87,59 @@ class BuildingsScreen extends StatelessWidget {
   }) async {
     final result = await Navigator.of(context).push<ApartmentModel>(
       MaterialPageRoute(
-        builder: (context) => ApartmentFormScreen(
-          existing: existing,
-          buildingId: buildingId,
-        ),
+        builder: (context) =>
+            ApartmentFormScreen(existing: existing, buildingId: buildingId),
       ),
     );
     if (!context.mounted || result == null) return;
 
-    final next = List<ApartmentModel>.from(apartments);
-    if (existing != null) {
-      final i = next.indexWhere((a) => a.apartmentId == existing.apartmentId);
-      if (i >= 0) {
-        next[i] = result.copyWith(apartmentId: existing.apartmentId);
-      }
-    } else {
-      next.add(result.copyWith(apartmentId: _nextApartmentId(apartments)));
-    }
-    onApartmentsChanged(next);
+    try {
+      final apiModel = result.copyWith(
+        apartmentId: existing?.apartmentId ?? _nextApartmentId(apartments),
+        typeId: existing?.typeId ?? result.typeId,
+        notes: result.notes ?? existing?.notes,
+        description: result.description ?? existing?.description,
+      );
+      final saved = existing != null
+          ? await EstateApi.instance.updateApartment(apiModel)
+          : await EstateApi.instance.createApartment(apiModel);
 
-    if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          existing != null ? 'Apartment updated' : 'Apartment added',
+      final next = List<ApartmentModel>.from(apartments);
+      if (existing != null) {
+        final i = next.indexWhere((a) => a.apartmentId == existing.apartmentId);
+        if (i >= 0) {
+          next[i] = saved.copyWith(
+            number: result.number,
+            location: result.location,
+          );
+        }
+      } else {
+        next.add(
+          saved.copyWith(number: result.number, location: result.location),
+        );
+      }
+      onApartmentsChanged(next);
+
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            existing != null ? 'Apartment updated' : 'Apartment added',
+          ),
         ),
-      ),
-    );
+      );
+    } on ApiException catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Apartment save failed: ${e.message}')),
+      );
+    }
   }
 
-  Future<void> _confirmDeleteBuilding(BuildContext context, BuildingModel b) async {
+  Future<void> _confirmDeleteBuilding(
+    BuildContext context,
+    BuildingModel b,
+  ) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -120,17 +159,25 @@ class BuildingsScreen extends StatelessWidget {
     );
     if (ok != true || !context.mounted) return;
 
-    onBuildingsChanged(
-      buildings.where((e) => e.buildingId != b.buildingId).toList(),
-    );
-    onApartmentsChanged(
-      apartments.where((e) => e.buildingId != b.buildingId).toList(),
-    );
+    try {
+      await EstateApi.instance.deleteBuilding(b.buildingId);
+      onBuildingsChanged(
+        buildings.where((e) => e.buildingId != b.buildingId).toList(),
+      );
+      onApartmentsChanged(
+        apartments.where((e) => e.buildingId != b.buildingId).toList(),
+      );
 
-    if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Building deleted')),
-    );
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Building deleted')));
+    } on ApiException catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Building delete failed: ${e.message}')),
+      );
+    }
   }
 
   Future<void> _confirmDeleteApartment(
@@ -156,14 +203,22 @@ class BuildingsScreen extends StatelessWidget {
     );
     if (ok != true || !context.mounted) return;
 
-    onApartmentsChanged(
-      apartments.where((e) => e.apartmentId != a.apartmentId).toList(),
-    );
+    try {
+      await EstateApi.instance.deleteApartment(a.apartmentId);
+      onApartmentsChanged(
+        apartments.where((e) => e.apartmentId != a.apartmentId).toList(),
+      );
 
-    if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Apartment deleted')),
-    );
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Apartment deleted')));
+    } on ApiException catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Apartment delete failed: ${e.message}')),
+      );
+    }
   }
 
   @override
@@ -215,8 +270,9 @@ class BuildingsScreen extends StatelessWidget {
         separatorBuilder: (context, index) => const SizedBox(height: 16),
         itemBuilder: (context, index) {
           final b = buildings[index];
-          final buildingApartments =
-              apartments.where((a) => a.buildingId == b.buildingId).toList();
+          final buildingApartments = apartments
+              .where((a) => a.buildingId == b.buildingId)
+              .toList();
 
           return Card(
             child: Padding(
@@ -285,7 +341,8 @@ class BuildingsScreen extends StatelessWidget {
                       shrinkWrap: true,
                       physics: const NeverScrollableScrollPhysics(),
                       itemCount: buildingApartments.length,
-                      separatorBuilder: (context, i) => const Divider(height: 1),
+                      separatorBuilder: (context, i) =>
+                          const Divider(height: 1),
                       itemBuilder: (context, i) {
                         final a = buildingApartments[i];
                         return Padding(
@@ -308,8 +365,9 @@ class BuildingsScreen extends StatelessWidget {
                                           ),
                                         ),
                                         AppStatusChip(
-                                          label:
-                                              a.isAvailable ? 'Vacant' : 'Occupied',
+                                          label: a.isAvailable
+                                              ? 'Vacant'
+                                              : 'Occupied',
                                           tone: a.isAvailable
                                               ? AppChipTone.neutral
                                               : AppChipTone.positive,
@@ -324,7 +382,8 @@ class BuildingsScreen extends StatelessWidget {
                                       ),
                                     ),
                                     Text(
-                                      r'$' '${a.rentPricePerMonth.toStringAsFixed(0)}/month',
+                                      r'$'
+                                      '${a.rentPricePerMonth.toStringAsFixed(0)}/month',
                                       style: TextStyle(
                                         color: scheme.primary,
                                         fontWeight: FontWeight.w600,
@@ -336,7 +395,10 @@ class BuildingsScreen extends StatelessWidget {
                               ),
                               PopupMenuButton<String>(
                                 itemBuilder: (context) => const [
-                                  PopupMenuItem(value: 'edit', child: Text('Edit')),
+                                  PopupMenuItem(
+                                    value: 'edit',
+                                    child: Text('Edit'),
+                                  ),
                                   PopupMenuItem(
                                     value: 'delete',
                                     child: Text('Delete'),
@@ -364,8 +426,10 @@ class BuildingsScreen extends StatelessWidget {
                     child: SizedBox(
                       width: double.infinity,
                       child: OutlinedButton.icon(
-                        onPressed: () =>
-                            _openApartmentForm(context, buildingId: b.buildingId),
+                        onPressed: () => _openApartmentForm(
+                          context,
+                          buildingId: b.buildingId,
+                        ),
                         icon: const Icon(Icons.add),
                         label: const Text('Add Apartment'),
                       ),
