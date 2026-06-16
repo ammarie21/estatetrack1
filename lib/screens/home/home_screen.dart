@@ -1,13 +1,17 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
+import 'package:estatetrack1/data/contract_builder.dart';
+import 'package:estatetrack1/data/rental_transaction_builder.dart';
 import 'package:estatetrack1/data/estate_api.dart';
 import 'package:estatetrack1/data/staff_user_registry.dart';
+import 'package:estatetrack1/models/apartment_type_model.dart';
 import 'package:estatetrack1/models/account_model.dart';
 import 'package:estatetrack1/models/apartment_model.dart';
 import 'package:estatetrack1/models/building_model.dart';
 import 'package:estatetrack1/models/apartment_return_model.dart';
 import 'package:estatetrack1/models/contract_model.dart';
 import 'package:estatetrack1/models/customer_model.dart';
-import 'package:estatetrack1/models/expense_model.dart';
 import 'package:estatetrack1/models/maintenance_model.dart';
 import 'package:estatetrack1/models/rental_booking_model.dart';
 import 'package:estatetrack1/models/rental_transaction_model.dart';
@@ -37,260 +41,26 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isLoadingFromApi = true;
   String? _apiError;
 
-  List<CustomerModel> _customers = [
-    const CustomerModel(
-      customerId: 1,
-      name: 'Sara Al-Masri',
-      phone: '+962 79 000 1111',
-      nationalNum: '9900123456',
-      numberOfRentedApartments: 1,
-      idNumber: '9900123456',
-      apartment: 'A-101',
-      startDate: '2024-06-01',
-      endDate: '2025-05-31',
-    ),
-    const CustomerModel(
-      customerId: 2,
-      name: 'Omar Haddad',
-      phone: '+962 78 222 3333',
-      nationalNum: '8800654321',
-      numberOfRentedApartments: 1,
-      idNumber: '8800654321',
-      apartment: 'B-204',
-      startDate: '2024-01-15',
-      endDate: '2025-01-14',
-    ),
-    const CustomerModel(
-      customerId: 3,
-      name: 'Layla Nasser',
-      phone: '+962 77 444 5555',
-      nationalNum: '7700112233',
-      numberOfRentedApartments: 1,
-      idNumber: '7700112233',
-      apartment: 'C-310',
-      startDate: '2023-09-01',
-      endDate: '2024-08-31',
-    ),
-  ];
+  List<CustomerModel> _customers = [];
 
-  List<BuildingModel> _buildings = [
-    const BuildingModel(
-      buildingId: 1,
-      name: 'Tower A',
-      floorsCount: 5,
-      constructionYear: 2020,
-      totalApartments: 15,
-      location: 'Downtown',
-    ),
-    const BuildingModel(
-      buildingId: 2,
-      name: 'Tower B',
-      floorsCount: 8,
-      constructionYear: 2019,
-      totalApartments: 24,
-      location: 'Business District',
-    ),
-    const BuildingModel(
-      buildingId: 3,
-      name: 'Tower C',
-      floorsCount: 10,
-      constructionYear: 2021,
-      totalApartments: 30,
-      location: 'Residential Area',
-    ),
-  ];
+  List<BuildingModel> _buildings = [];
 
-  List<ApartmentModel> _apartments = [
-    const ApartmentModel(
-      apartmentId: 1,
-      buildingId: 1,
-      typeId: 1,
-      sizeM2: 85,
-      rentPricePerMonth: 450,
-      rentPricePerDay: 20,
-      isAvailable: false,
-      bedrooms: 2,
-      bathrooms: 2,
-      hasBalcony: true,
-      furnished: false,
-      hasInternet: true,
-      parking: true,
-      elevator: true,
-      number: 'A-101',
-      location: 'Tower A, Floor 1',
-    ),
-    const ApartmentModel(
-      apartmentId: 2,
-      buildingId: 1,
-      typeId: 1,
-      sizeM2: 80,
-      rentPricePerMonth: 420,
-      rentPricePerDay: 18,
-      isAvailable: true,
-      bedrooms: 2,
-      bathrooms: 1,
-      hasBalcony: false,
-      furnished: false,
-      hasInternet: true,
-      parking: false,
-      elevator: true,
-      number: 'A-102',
-      location: 'Tower A, Floor 1',
-    ),
-    const ApartmentModel(
-      apartmentId: 3,
-      buildingId: 2,
-      typeId: 2,
-      sizeM2: 120,
-      rentPricePerMonth: 680,
-      rentPricePerDay: 30,
-      isAvailable: false,
-      bedrooms: 3,
-      bathrooms: 2,
-      hasBalcony: true,
-      furnished: true,
-      hasInternet: true,
-      parking: true,
-      elevator: true,
-      number: 'B-204',
-      location: 'Tower B, Floor 2',
-    ),
-    const ApartmentModel(
-      apartmentId: 4,
-      buildingId: 2,
-      typeId: 2,
-      sizeM2: 115,
-      rentPricePerMonth: 650,
-      rentPricePerDay: 28,
-      isAvailable: false,
-      bedrooms: 3,
-      bathrooms: 2,
-      hasBalcony: true,
-      furnished: false,
-      hasInternet: true,
-      parking: true,
-      elevator: true,
-      number: 'B-205',
-      location: 'Tower B, Floor 2',
-    ),
-    const ApartmentModel(
-      apartmentId: 5,
-      buildingId: 3,
-      typeId: 3,
-      sizeM2: 160,
-      rentPricePerMonth: 890,
-      rentPricePerDay: 40,
-      isAvailable: true,
-      bedrooms: 4,
-      bathrooms: 3,
-      hasBalcony: true,
-      furnished: true,
-      hasInternet: true,
-      parking: true,
-      elevator: true,
-      number: 'C-310',
-      location: 'Tower C, Floor 3',
-    ),
-  ];
+  List<ApartmentModel> _apartments = [];
+
+  List<ApartmentTypeModel> _apartmentTypes = [];
 
   /// ERD rental bookings (staff user from logged-in account).
-  List<RentalBookingModel> _bookings = [
-    RentalBookingModel(
-      bookingId: 1,
-      userId: 1,
-      customerId: 1,
-      apartmentId: 1,
-      startDate: DateTime(2024, 6, 1),
-      endDate: DateTime(2025, 5, 31),
-      initialTotalDueAmount: 5400,
-      bookingType: 0,
-      periodFee: 450,
-      initialCheckNotes: 'Yearly lease',
-    ),
-    RentalBookingModel(
-      bookingId: 2,
-      userId: 1,
-      customerId: 2,
-      apartmentId: 3,
-      startDate: DateTime(2024, 1, 15),
-      endDate: DateTime(2025, 1, 14),
-      initialTotalDueAmount: 8160,
-      bookingType: 0,
-      periodFee: 680,
-    ),
-  ];
+  List<RentalBookingModel> _bookings = [];
 
-  List<ContractModel> _contracts = [
-    ContractModel(
-      contractId: 1,
-      customerId: 1,
-      apartmentId: 1,
-      startDate: DateTime(2024, 6, 1),
-      endDate: DateTime(2025, 5, 31),
-      totalAmount: 5400,
-      status: 'Active',
-      bookingId: 1,
-      notes: 'Yearly contract',
-    ),
-    ContractModel(
-      contractId: 2,
-      customerId: 2,
-      apartmentId: 3,
-      startDate: DateTime(2024, 1, 15),
-      endDate: DateTime(2025, 1, 14),
-      totalAmount: 8160,
-      status: 'Active',
-      bookingId: 2,
-      notes: 'Annual lease',
-    ),
-  ];
+  List<ContractModel> _contracts = [];
 
   List<ApartmentReturnModel> _returns = [];
 
-  /// ERD rental transactions (linked to bookings; [returnId] when checkout exists).
-  List<RentalTransactionModel> _rentalTransactions = [
-    RentalTransactionModel(
-      transactionId: 1,
-      bookingId: 1,
-      returnId: null,
-      paidInitialTotalDueAmount: 450,
-      actualTotalDueAmount: 5400,
-      totalRemaining: 4950,
-      totalRefundedAmount: 0,
-      transactionStatus: 'Partial',
-      updatedTransactionDate: DateTime(2025, 3, 1),
-      paymentDetails: 'Monthly rent — March',
-    ),
-    RentalTransactionModel(
-      transactionId: 2,
-      bookingId: 2,
-      returnId: null,
-      paidInitialTotalDueAmount: 680,
-      actualTotalDueAmount: 8160,
-      totalRemaining: 7480,
-      totalRefundedAmount: 0,
-      transactionStatus: 'Partial',
-      updatedTransactionDate: DateTime(2025, 3, 2),
-      paymentDetails: 'Monthly rent — March',
-    ),
-  ];
-
-  List<ExpenseModel> _expenses = [
-    const ExpenseModel(
-      id: 1,
-      category: 'Utilities',
-      amount: 180,
-      date: '2025-03-06',
-    ),
-    const ExpenseModel(
-      id: 2,
-      category: 'Cleaning',
-      amount: 120,
-      date: '2025-03-10',
-    ),
-  ];
+  /// Derived from bookings + returns (matches backend RentalBooking fields).
+  List<RentalTransactionModel> _rentalTransactions = [];
 
   List<MaintenanceModel> _maintenance = [];
+  DateTime? _lastRefreshed;
 
   @override
   void initState() {
@@ -298,7 +68,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _loadFromApi();
   }
 
-  Future<void> _loadFromApi() async {
+  Future<void> _loadFromApi({bool showFeedback = false}) async {
     setState(() {
       _isLoadingFromApi = true;
       _apiError = null;
@@ -311,27 +81,53 @@ class _HomeScreenState extends State<HomeScreen> {
         _customers = List<CustomerModel>.from(snapshot.customers);
         _buildings = snapshot.buildings;
         _apartments = snapshot.apartments;
+        _apartmentTypes = List<ApartmentTypeModel>.from(
+          snapshot.apartmentTypes,
+        );
         _bookings = snapshot.bookings;
         _contracts = snapshot.contracts;
         _returns = snapshot.returns;
         _rentalTransactions = snapshot.rentalTransactions;
-        _expenses = snapshot.expenses;
-        _maintenance = snapshot.maintenance;
+        _maintenance = List<MaintenanceModel>.from(snapshot.maintenance)
+          ..sort((a, b) => b.date.compareTo(a.date));
         _isLoadingFromApi = false;
+        _lastRefreshed = DateTime.now();
       });
+      if (!mounted) return;
+      if (showFeedback) {
+        AppSnackbars.success(context, 'Data refreshed from backend');
+      }
     } on ApiException catch (e) {
       if (!mounted) return;
       setState(() {
         _apiError = e.message;
         _isLoadingFromApi = false;
       });
+      if (!mounted) return;
+      if (showFeedback) {
+        AppSnackbars.error(context, 'API load failed: ${e.message}');
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _apiError = e.toString();
         _isLoadingFromApi = false;
       });
+      AppSnackbars.error(context, 'API load failed');
     }
+  }
+
+  Future<void> _refreshFromApi() => _loadFromApi(showFeedback: true);
+
+  Future<void> _confirmLogout() async {
+    final ok = await showAppConfirmDialog(
+      context,
+      title: 'Log out?',
+      message: 'You will return to the login screen.',
+      confirmLabel: 'Log out',
+      destructive: true,
+    );
+    if (ok && mounted) _logout();
   }
 
   void _logout() {
@@ -348,6 +144,7 @@ class _HomeScreenState extends State<HomeScreen> {
         builder: (context) => ContractFormScreen(
           existing: existing,
           customers: _customers,
+          buildings: _buildings,
           apartments: _apartments,
           bookings: _bookings,
         ),
@@ -355,14 +152,56 @@ class _HomeScreenState extends State<HomeScreen> {
     );
     if (!mounted || result == null) return;
 
-    setState(() {
-      final i = _contracts.indexWhere(
-        (c) => c.contractId == existing.contractId,
+    try {
+      final staffUserId = staffUserIdForAccount(widget.account);
+      final bookingId = existing.bookingId;
+      final months = math.max(
+        1,
+        (result.endDate.difference(result.startDate).inDays / 30).ceil(),
       );
-      if (i >= 0) {
-        _contracts[i] = result.copyWith(contractId: existing.contractId);
-      }
-    });
+      final existingBooking = _bookings
+          .where((b) => b.bookingId == bookingId)
+          .firstOrNull;
+      final booking = RentalBookingModel(
+        bookingId: bookingId,
+        userId: staffUserId,
+        customerId: result.customerId,
+        apartmentId: result.apartmentId,
+        startDate: result.startDate,
+        endDate: result.endDate,
+        initialTotalDueAmount: result.totalAmount,
+        bookingType: result.bookingType,
+        periodFee: result.totalAmount / months,
+        rentalPrice: existingBooking?.rentalPrice ?? 0,
+        paymentDetails: existingBooking?.paymentDetails,
+        isActive: existingBooking?.isActive ?? true,
+        initialCheckNotes: result.notes,
+      );
+      final savedBooking = await EstateApi.instance.updateBooking(booking);
+
+      setState(() {
+        final bi = _bookings.indexWhere((b) => b.bookingId == bookingId);
+        if (bi >= 0) {
+          _bookings[bi] = savedBooking;
+        }
+        final ci = _contracts.indexWhere(
+          (c) => c.contractId == existing.contractId,
+        );
+        if (ci >= 0) {
+          _contracts[ci] = contractFromBooking(
+            savedBooking,
+            returns: _returns,
+          ).copyWith(notes: result.notes);
+        }
+        _rentalTransactions = buildTransactionsFromBookings(
+          _bookings,
+          _returns,
+        );
+      });
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      AppSnackbars.error(context, 'Agreement save failed: ${e.message}');
+    }
   }
 
   void _selectDrawerDestination(int? index) {
@@ -389,9 +228,9 @@ class _HomeScreenState extends State<HomeScreen> {
         hint: 'Apartment · Customer · Booking · Transaction snapshot',
       ),
       (title: 'Customers', hint: 'Customer records'),
-      (title: 'Buildings', hint: 'Building · Apartment inventory'),
+      (title: 'Buildings', hint: 'Inventory · Maintenance · Apartment costs'),
       (title: 'Rentals', hint: 'Rental Booking · Agreement · Apartment Return'),
-      (title: 'Payments', hint: 'Rental Transaction · Expenses'),
+      (title: 'Payments', hint: 'Rental Transaction · Booking payments'),
       (title: 'Reports', hint: 'Revenue & occupancy analytics'),
       if (isAdmin) (title: 'Accounts', hint: 'Staff sign-in · Roles'),
     ];
@@ -402,8 +241,10 @@ class _HomeScreenState extends State<HomeScreen> {
         customers: _customers,
         bookings: _bookings,
         returns: _returns,
+        contracts: _contracts,
         rentalTransactions: _rentalTransactions,
-        expenses: _expenses,
+        maintenance: _maintenance,
+        onRefresh: _refreshFromApi,
       ),
       CustomersScreen(
         customers: _customers,
@@ -411,32 +252,54 @@ class _HomeScreenState extends State<HomeScreen> {
           _customers.clear();
           _customers.addAll(updated);
         }),
+        onRefresh: _refreshFromApi,
       ),
       BuildingsScreen(
         buildings: _buildings,
         apartments: _apartments,
+        apartmentTypes: _apartmentTypes,
+        maintenance: _maintenance,
         onBuildingsChanged: (list) => setState(() {
           _buildings = List<BuildingModel>.from(list);
         }),
         onApartmentsChanged: (list) => setState(() {
           _apartments = List<ApartmentModel>.from(list);
         }),
+        onMaintenanceChanged: (updated) => setState(() {
+          _maintenance = List<MaintenanceModel>.from(updated);
+        }),
+        onRefresh: _refreshFromApi,
+        onApartmentTypesChanged: (types) => setState(() {
+          _apartmentTypes = List<ApartmentTypeModel>.from(types);
+        }),
       ),
       ContractsScreen(
         staffUserId: staffUserId,
         customers: _customers,
+        buildings: _buildings,
         apartments: _apartments,
         bookings: _bookings,
         contracts: _contracts,
         returns: _returns,
+        onRefresh: _refreshFromApi,
         onBookingsChanged: (list) => setState(() {
           _bookings = List<RentalBookingModel>.from(list);
+          _contracts = contractsFromBookings(_bookings, _returns);
+          _rentalTransactions = buildTransactionsFromBookings(
+            _bookings,
+            _returns,
+          );
         }),
         onContractsChanged: (list) => setState(() {
           _contracts = List<ContractModel>.from(list);
         }),
         onReturnsChanged: (list) => setState(() {
           _returns = List<ApartmentReturnModel>.from(list);
+          _contracts = contractsFromBookings(_bookings, _returns);
+          _rentalTransactions = buildTransactionsFromBookings(
+            _bookings,
+            _returns,
+          );
         }),
         onApartmentsChanged: (list) => setState(() {
           _apartments = List<ApartmentModel>.from(list);
@@ -444,24 +307,34 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       PaymentsScreen(
         rentalTransactions: _rentalTransactions,
+        staffUserId: staffUserId,
         bookings: _bookings,
         returns: _returns,
         customers: _customers,
+        buildings: _buildings,
         apartments: _apartments,
-        expenses: _expenses,
+        onRefresh: _refreshFromApi,
         onRentalTransactionsChanged: (updated) => setState(() {
           _rentalTransactions = List<RentalTransactionModel>.from(updated);
         }),
-        onExpensesChanged: (updated) => setState(() {
-          _expenses = List<ExpenseModel>.from(updated);
+        onBookingsChanged: (list) => setState(() {
+          _bookings = List<RentalBookingModel>.from(list);
+          _contracts = contractsFromBookings(_bookings, _returns);
+          _rentalTransactions = buildTransactionsFromBookings(
+            _bookings,
+            _returns,
+          );
         }),
       ),
       ReportsScreen(
         rentalTransactions: _rentalTransactions,
-        expenses: _expenses,
         apartments: _apartments,
+        buildings: _buildings,
         customers: _customers,
+        bookings: _bookings,
+        contracts: _contracts,
         maintenance: _maintenance,
+        onRefresh: _refreshFromApi,
       ),
       if (isAdmin) const AdminAccountsScreen(),
     ];
@@ -598,6 +471,29 @@ class _HomeScreenState extends State<HomeScreen> {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 4),
             child: Center(
+              child: AppBackendStatusChip(
+                state: _isLoadingFromApi
+                    ? AppBackendSyncState.loading
+                    : _apiError != null
+                    ? AppBackendSyncState.error
+                    : AppBackendSyncState.online,
+                lastRefreshed: _lastRefreshed,
+              ),
+            ),
+          ),
+          IconButton(
+            icon: Icon(
+              _showCalendar
+                  ? Icons.calendar_month
+                  : Icons.calendar_month_outlined,
+            ),
+            tooltip: 'Calendar',
+            color: _showCalendar ? scheme.primary : null,
+            onPressed: () => setState(() => _showCalendar = true),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Center(
               child: Container(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 10,
@@ -640,12 +536,12 @@ class _HomeScreenState extends State<HomeScreen> {
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
             tooltip: 'Refresh API data',
-            onPressed: _isLoadingFromApi ? null : _loadFromApi,
+            onPressed: _isLoadingFromApi ? null : _refreshFromApi,
           ),
           IconButton(
             icon: const Icon(Icons.logout_rounded),
             tooltip: 'Logout',
-            onPressed: _logout,
+            onPressed: _confirmLogout,
           ),
         ],
       ),
@@ -674,31 +570,11 @@ class _HomeScreenState extends State<HomeScreen> {
             Positioned(
               left: 12,
               right: 12,
-              bottom: 12,
-              child: Card(
-                color: scheme.errorContainer,
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.cloud_off_rounded,
-                        color: scheme.onErrorContainer,
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          'API load failed: $_apiError',
-                          style: TextStyle(color: scheme.onErrorContainer),
-                        ),
-                      ),
-                      TextButton(
-                        onPressed: _loadFromApi,
-                        child: const Text('Retry'),
-                      ),
-                    ],
-                  ),
-                ),
+              bottom: 72,
+              child: AppInlineError(
+                message: 'API load failed: $_apiError',
+                onRetry: _refreshFromApi,
+                compact: true,
               ),
             ),
         ],

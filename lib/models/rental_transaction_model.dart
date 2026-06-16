@@ -10,6 +10,7 @@ class RentalTransactionModel {
     required this.totalRefundedAmount,
     required this.transactionStatus,
     required this.updatedTransactionDate,
+    this.createdByUserId = 0,
     this.paymentDetails,
   });
 
@@ -20,8 +21,10 @@ class RentalTransactionModel {
   final double actualTotalDueAmount;
   final double totalRemaining;
   final double totalRefundedAmount;
-  final String transactionStatus; // e.g. 'Paid', 'Partial', 'Refunded', 'Pending'
+  final String
+  transactionStatus; // e.g. 'Paid', 'Partial', 'Refunded', 'Pending'
   final DateTime updatedTransactionDate;
+  final int createdByUserId;
   final String? paymentDetails;
 
   RentalTransactionModel copyWith({
@@ -35,6 +38,7 @@ class RentalTransactionModel {
     double? totalRefundedAmount,
     String? transactionStatus,
     DateTime? updatedTransactionDate,
+    int? createdByUserId,
     String? paymentDetails,
   }) {
     return RentalTransactionModel(
@@ -42,13 +46,14 @@ class RentalTransactionModel {
       bookingId: bookingId ?? this.bookingId,
       returnId: clearReturnId ? null : (returnId ?? this.returnId),
       paidInitialTotalDueAmount:
-      paidInitialTotalDueAmount ?? this.paidInitialTotalDueAmount,
+          paidInitialTotalDueAmount ?? this.paidInitialTotalDueAmount,
       actualTotalDueAmount: actualTotalDueAmount ?? this.actualTotalDueAmount,
       totalRemaining: totalRemaining ?? this.totalRemaining,
       totalRefundedAmount: totalRefundedAmount ?? this.totalRefundedAmount,
       transactionStatus: transactionStatus ?? this.transactionStatus,
       updatedTransactionDate:
-      updatedTransactionDate ?? this.updatedTransactionDate,
+          updatedTransactionDate ?? this.updatedTransactionDate,
+      createdByUserId: createdByUserId ?? this.createdByUserId,
       paymentDetails: paymentDetails ?? this.paymentDetails,
     );
   }

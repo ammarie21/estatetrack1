@@ -8,7 +8,10 @@ class ApartmentReturnModel {
     required this.actualRentalDays,
     required this.additionalCharges,
     required this.actualTotalDueAmount,
+    this.totalRemaining = 0,
+    this.totalRefundedAmount = 0,
     this.finalCheckNotes,
+    this.finalPaymentCollected = 0,
   });
 
   final int returnId;
@@ -17,7 +20,10 @@ class ApartmentReturnModel {
   final int actualRentalDays;
   final double additionalCharges;
   final double actualTotalDueAmount;
+  final double totalRemaining;
+  final double totalRefundedAmount;
   final String? finalCheckNotes;
+  final double finalPaymentCollected;
 
   ApartmentReturnModel copyWith({
     int? returnId,
@@ -26,7 +32,10 @@ class ApartmentReturnModel {
     int? actualRentalDays,
     double? additionalCharges,
     double? actualTotalDueAmount,
+    double? totalRemaining,
+    double? totalRefundedAmount,
     String? finalCheckNotes,
+    double? finalPaymentCollected,
     bool clearBookingId = false,
   }) {
     return ApartmentReturnModel(
@@ -36,7 +45,11 @@ class ApartmentReturnModel {
       actualRentalDays: actualRentalDays ?? this.actualRentalDays,
       additionalCharges: additionalCharges ?? this.additionalCharges,
       actualTotalDueAmount: actualTotalDueAmount ?? this.actualTotalDueAmount,
+      totalRemaining: totalRemaining ?? this.totalRemaining,
+      totalRefundedAmount: totalRefundedAmount ?? this.totalRefundedAmount,
       finalCheckNotes: finalCheckNotes ?? this.finalCheckNotes,
+      finalPaymentCollected:
+          finalPaymentCollected ?? this.finalPaymentCollected,
     );
   }
 }

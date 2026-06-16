@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
-import 'package:estatetrack1/data/mock_auth_repository.dart';
+import 'package:estatetrack1/data/estate_api.dart';
+import 'package:estatetrack1/models/user_model.dart';
+import 'package:estatetrack1/ui/app_components.dart';
 
 class CreateAccountScreen extends StatefulWidget {
   const CreateAccountScreen({super.key});
@@ -12,44 +14,66 @@ class CreateAccountScreen extends StatefulWidget {
 class _CreateAccountScreenState extends State<CreateAccountScreen> {
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
-  final _emailController = TextEditingController();
   final _phoneController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
-  String _role = 'User';
+  bool _isSaving = false;
 
   @override
   void dispose() {
     _nameController.dispose();
-    _emailController.dispose();
     _phoneController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
     super.dispose();
   }
 
-  void _createAccount() {
+  String? _validatePasswordRules(String password) {
+    final hasUpper = RegExp(r'[A-Z]').hasMatch(password);
+    final hasLower = RegExp(r'[a-z]').hasMatch(password);
+    final hasDigit = RegExp(r'\d').hasMatch(password);
+    final hasSpecial = RegExp(r'[!@#\$%^&*(),.?":{}|<>]').hasMatch(password);
+
+    if (password.length < 8) {
+      return 'Password must be at least 8 characters.';
+    }
+    if (!hasUpper || !hasLower || !hasDigit || !hasSpecial) {
+      return 'Password needs upper, lower, number, and special character.';
+    }
+    return null;
+  }
+
+  Future<void> _createAccount() async {
     if (!_formKey.currentState!.validate()) {
       return;
     }
 
-    final error = MockAuthRepository.instance.createAccount(
-      name: _nameController.text,
-      email: _emailController.text,
-      phone: _phoneController.text,
-      password: _passwordController.text,
-      role: _role,
-    );
+    setState(() => _isSaving = true);
+    try {
+      final saved = await EstateApi.instance.createUser(
+        UserModel(
+          userId: 0,
+          name: _nameController.text.trim(),
+          phone: _phoneController.text.trim(),
+          password: _passwordController.text.trim(),
+        ),
+      );
 
-    if (error != null) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error)));
-      return;
+      if (!mounted) return;
+      AppSnackbars.success(
+        context,
+        'User created. Sign in with UserID ${saved.userId}.',
+      );
+      Navigator.of(context).pop();
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      AppSnackbars.error(context, 'Create failed: ${e.message}');
+    } catch (e) {
+      if (!mounted) return;
+      AppSnackbars.error(context, 'Create failed: $e');
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
     }
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Account created and auto-approved.')),
-    );
-    Navigator.of(context).pop();
   }
 
   @override
@@ -63,28 +87,21 @@ class _CreateAccountScreenState extends State<CreateAccountScreen> {
             key: _formKey,
             child: Column(
               children: [
+                const AppFlowBanner(
+                  icon: Icons.cloud_upload_outlined,
+                  text:
+                      'New accounts are created in the backend Users table. Keep the returned UserID for login.',
+                ),
+                const SizedBox(height: 16),
                 TextFormField(
                   controller: _nameController,
                   decoration: const InputDecoration(
                     labelText: 'Name',
                     prefixIcon: Icon(Icons.person_outline),
                   ),
-                  validator: (value) =>
-                  (value == null || value.trim().isEmpty) ? 'Required' : null,
-                ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: _emailController,
-                  keyboardType: TextInputType.emailAddress,
-                  decoration: const InputDecoration(
-                    labelText: 'Email',
-                    prefixIcon: Icon(Icons.email_outlined),
-                  ),
-                  validator: (value) {
-                    if (value == null || value.trim().isEmpty) return 'Required';
-                    if (!value.contains('@')) return 'Invalid email';
-                    return null;
-                  },
+                  validator: (value) => (value == null || value.trim().isEmpty)
+                      ? 'Required'
+                      : null,
                 ),
                 const SizedBox(height: 12),
                 TextFormField(
@@ -94,21 +111,9 @@ class _CreateAccountScreenState extends State<CreateAccountScreen> {
                     labelText: 'Phone',
                     prefixIcon: Icon(Icons.phone_outlined),
                   ),
-                  validator: (value) =>
-                  (value == null || value.trim().isEmpty) ? 'Required' : null,
-                ),
-                const SizedBox(height: 12),
-                DropdownButtonFormField<String>(
-                  initialValue: _role,
-                  decoration: const InputDecoration(
-                    labelText: 'Role',
-                    prefixIcon: Icon(Icons.badge_outlined),
-                  ),
-                  items: const [
-                    DropdownMenuItem(value: 'User', child: Text('User')),
-                    DropdownMenuItem(value: 'Admin', child: Text('Admin')),
-                  ],
-                  onChanged: (value) => setState(() => _role = value ?? 'User'),
+                  validator: (value) => (value == null || value.trim().isEmpty)
+                      ? 'Required'
+                      : null,
                 ),
                 const SizedBox(height: 12),
                 TextFormField(
@@ -120,7 +125,7 @@ class _CreateAccountScreenState extends State<CreateAccountScreen> {
                   ),
                   validator: (value) {
                     if (value == null || value.isEmpty) return 'Required';
-                    return MockAuthRepository.instance.validatePasswordRules(value);
+                    return _validatePasswordRules(value);
                   },
                 ),
                 const SizedBox(height: 12),
@@ -143,8 +148,14 @@ class _CreateAccountScreenState extends State<CreateAccountScreen> {
                 SizedBox(
                   width: double.infinity,
                   child: FilledButton(
-                    onPressed: _createAccount,
-                    child: const Text('Create Account'),
+                    onPressed: _isSaving ? null : _createAccount,
+                    child: _isSaving
+                        ? const SizedBox(
+                            height: 20,
+                            width: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Text('Create Account'),
                   ),
                 ),
               ],

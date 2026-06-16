@@ -4,6 +4,7 @@ import 'package:estatetrack1/data/estate_api.dart';
 import 'package:estatetrack1/screens/home/home_screen.dart';
 import 'package:estatetrack1/screens/login/create_account_screen.dart';
 import 'package:estatetrack1/screens/login/forgot_password_screen.dart';
+import 'package:estatetrack1/ui/app_components.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -16,6 +17,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final _identifierController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _isLoading = false;
+  bool _obscurePassword = true;
 
   @override
   void dispose() {
@@ -27,9 +29,11 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<void> _onLogin() async {
     final userId = int.tryParse(_identifierController.text.trim());
     if (userId == null || userId < 1) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Enter a valid user number.')),
-      );
+      AppSnackbars.error(context, 'Enter a valid backend UserID.');
+      return;
+    }
+    if (_passwordController.text.isEmpty) {
+      AppSnackbars.error(context, 'Enter your password.');
       return;
     }
 
@@ -42,9 +46,7 @@ class _LoginScreenState extends State<LoginScreen> {
       if (!mounted) return;
 
       if (account == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Invalid user number or password.')),
-        );
+        AppSnackbars.error(context, 'Invalid UserID or password.');
         return;
       }
 
@@ -55,14 +57,10 @@ class _LoginScreenState extends State<LoginScreen> {
       );
     } on ApiException catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Login failed: ${e.message}')));
+      AppSnackbars.error(context, 'Login failed: ${e.message}');
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Login failed: $e')));
+      AppSnackbars.error(context, 'Login failed: $e');
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -114,7 +112,13 @@ class _LoginScreenState extends State<LoginScreen> {
                   context,
                 ).textTheme.bodyLarge?.copyWith(color: scheme.onSurfaceVariant),
               ),
-              const SizedBox(height: 48),
+              const SizedBox(height: 32),
+              const AppFlowBanner(
+                icon: Icons.cloud_done_outlined,
+                text:
+                    'Sign in with your backend UserID. Accounts are loaded from the ApartmentRental API.',
+              ),
+              const SizedBox(height: 16),
               TextField(
                 controller: _identifierController,
                 keyboardType: TextInputType.number,
@@ -128,10 +132,21 @@ class _LoginScreenState extends State<LoginScreen> {
               const SizedBox(height: 16),
               TextField(
                 controller: _passwordController,
-                obscureText: true,
-                decoration: const InputDecoration(
+                obscureText: _obscurePassword,
+                textInputAction: TextInputAction.done,
+                onSubmitted: (_) => _onLogin(),
+                decoration: InputDecoration(
                   labelText: 'Password',
-                  prefixIcon: Icon(Icons.lock_outline_rounded),
+                  prefixIcon: const Icon(Icons.lock_outline_rounded),
+                  suffixIcon: IconButton(
+                    icon: Icon(
+                      _obscurePassword
+                          ? Icons.visibility_outlined
+                          : Icons.visibility_off_outlined,
+                    ),
+                    onPressed: () =>
+                        setState(() => _obscurePassword = !_obscurePassword),
+                  ),
                 ),
               ),
               const SizedBox(height: 32),

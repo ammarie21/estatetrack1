@@ -10,6 +10,9 @@ class RentalBookingModel {
     required this.initialTotalDueAmount,
     required this.bookingType,
     required this.periodFee,
+    this.rentalPrice = 0,
+    this.paymentDetails,
+    this.isActive = true,
     this.initialCheckNotes,
   });
 
@@ -22,6 +25,9 @@ class RentalBookingModel {
   final double initialTotalDueAmount;
   final int bookingType; // 0 = monthly, 1 = daily
   final double periodFee;
+  final double rentalPrice;
+  final String? paymentDetails;
+  final bool isActive;
   final String? initialCheckNotes;
 
   RentalBookingModel copyWith({
@@ -34,6 +40,9 @@ class RentalBookingModel {
     double? initialTotalDueAmount,
     int? bookingType,
     double? periodFee,
+    double? rentalPrice,
+    String? paymentDetails,
+    bool? isActive,
     String? initialCheckNotes,
   }) {
     return RentalBookingModel(
@@ -44,9 +53,12 @@ class RentalBookingModel {
       startDate: startDate ?? this.startDate,
       endDate: endDate ?? this.endDate,
       initialTotalDueAmount:
-      initialTotalDueAmount ?? this.initialTotalDueAmount,
+          initialTotalDueAmount ?? this.initialTotalDueAmount,
       bookingType: bookingType ?? this.bookingType,
       periodFee: periodFee ?? this.periodFee,
+      rentalPrice: rentalPrice ?? this.rentalPrice,
+      paymentDetails: paymentDetails ?? this.paymentDetails,
+      isActive: isActive ?? this.isActive,
       initialCheckNotes: initialCheckNotes ?? this.initialCheckNotes,
     );
   }

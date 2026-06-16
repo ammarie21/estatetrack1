@@ -41,7 +41,7 @@ class CustomerModel {
       phone: phone ?? this.phone,
       nationalNum: nationalNum ?? this.nationalNum,
       numberOfRentedApartments:
-      numberOfRentedApartments ?? this.numberOfRentedApartments,
+          numberOfRentedApartments ?? this.numberOfRentedApartments,
       idNumber: idNumber ?? this.idNumber,
       apartment: apartment ?? this.apartment,
       startDate: startDate ?? this.startDate,

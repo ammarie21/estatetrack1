@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'package:estatetrack1/models/payment_model.dart';
+import 'package:estatetrack1/ui/app_components.dart';
 
 class PaymentFormScreen extends StatefulWidget {
   const PaymentFormScreen({super.key, this.existing});
@@ -15,7 +16,7 @@ class _PaymentFormScreenState extends State<PaymentFormScreen> {
   late final TextEditingController _customer;
   late final TextEditingController _apartment;
   late final TextEditingController _amount;
-  late final TextEditingController _date;
+  DateTime _date = DateTime.now();
 
   @override
   void initState() {
@@ -26,7 +27,7 @@ class _PaymentFormScreenState extends State<PaymentFormScreen> {
     _amount = TextEditingController(
       text: e != null ? e.amount.toStringAsFixed(2) : '',
     );
-    _date = TextEditingController(text: e?.date ?? '');
+    _date = DateTime.tryParse(e?.date ?? '') ?? DateTime.now();
   }
 
   @override
@@ -34,12 +35,29 @@ class _PaymentFormScreenState extends State<PaymentFormScreen> {
     _customer.dispose();
     _apartment.dispose();
     _amount.dispose();
-    _date.dispose();
     super.dispose();
+  }
+
+  Future<void> _pickDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _date,
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2035),
+    );
+    if (picked != null) setState(() => _date = picked);
   }
 
   void _save() {
     final amt = double.tryParse(_amount.text.replaceAll(',', '')) ?? 0;
+    if (_customer.text.trim().isEmpty || _apartment.text.trim().isEmpty) {
+      AppSnackbars.error(context, 'Enter customer and apartment details');
+      return;
+    }
+    if (amt <= 0) {
+      AppSnackbars.error(context, 'Amount must be greater than zero');
+      return;
+    }
     final e = widget.existing;
     Navigator.of(context).pop(
       PaymentModel(
@@ -47,7 +65,7 @@ class _PaymentFormScreenState extends State<PaymentFormScreen> {
         customer: _customer.text.trim(),
         apartment: _apartment.text.trim(),
         amount: amt,
-        date: _date.text.trim(),
+        date: _date.toIso8601String().split('T').first,
       ),
     );
   }
@@ -56,12 +74,16 @@ class _PaymentFormScreenState extends State<PaymentFormScreen> {
   Widget build(BuildContext context) {
     final isEdit = widget.existing != null;
     return Scaffold(
-      appBar: AppBar(
-        title: Text(isEdit ? 'Edit Payment' : 'Add Payment'),
-      ),
+      appBar: AppBar(title: Text(isEdit ? 'Edit Payment' : 'Add Payment')),
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
+          const AppFlowBanner(
+            icon: Icons.info_outline,
+            text:
+                'Legacy local payment form. Backend payments should use the Payments tab transaction workflow.',
+          ),
+          const SizedBox(height: 16),
           TextField(
             controller: _customer,
             decoration: const InputDecoration(
@@ -87,31 +109,11 @@ class _PaymentFormScreenState extends State<PaymentFormScreen> {
             ),
           ),
           const SizedBox(height: 12),
-          TextField(
-            controller: _date,
-            decoration: const InputDecoration(
-              labelText: 'Date',
-              hintText: 'e.g. 2025-01-15',
-              prefixIcon: Icon(Icons.calendar_today_outlined),
-            ),
-          ),
+          AppDateField(label: 'Payment date', date: _date, onPick: _pickDate),
           const SizedBox(height: 28),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('Cancel'),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: FilledButton(
-                  onPressed: _save,
-                  child: const Text('Save'),
-                ),
-              ),
-            ],
+          AppFormActions(
+            onCancel: () => Navigator.of(context).pop(),
+            onSave: _save,
           ),
         ],
       ),

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'package:estatetrack1/models/apartment_model.dart';
+import 'package:estatetrack1/ui/app_components.dart';
 
 class ApartmentFormScreen extends StatefulWidget {
   const ApartmentFormScreen({super.key, this.existing});
@@ -51,6 +52,18 @@ class _ApartmentFormScreenState extends State<ApartmentFormScreen> {
     final rent = double.tryParse(_rent.text.replaceAll(',', '')) ?? 0;
     final beds = int.tryParse(_bedrooms.text) ?? 0;
     final baths = int.tryParse(_bathrooms.text) ?? 0;
+    if (_number.text.trim().isEmpty || _location.text.trim().isEmpty) {
+      AppSnackbars.error(context, 'Enter apartment number and location');
+      return;
+    }
+    if (rent <= 0) {
+      AppSnackbars.error(context, 'Rent must be greater than zero');
+      return;
+    }
+    if (beds < 1 || baths < 1) {
+      AppSnackbars.error(context, 'Bedrooms and bathrooms must be at least 1');
+      return;
+    }
     final e = widget.existing;
     final model = ApartmentModel(
       apartmentId: e?.apartmentId ?? 0,
@@ -77,12 +90,16 @@ class _ApartmentFormScreenState extends State<ApartmentFormScreen> {
   Widget build(BuildContext context) {
     final isEdit = widget.existing != null;
     return Scaffold(
-      appBar: AppBar(
-        title: Text(isEdit ? 'Edit Apartment' : 'Add Apartment'),
-      ),
+      appBar: AppBar(title: Text(isEdit ? 'Edit Apartment' : 'Add Apartment')),
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
+          const AppFlowBanner(
+            icon: Icons.info_outline,
+            text:
+                'Legacy local apartment form. Backend inventory is managed from Buildings.',
+          ),
+          const SizedBox(height: 16),
           TextField(
             controller: _number,
             decoration: const InputDecoration(
@@ -132,22 +149,9 @@ class _ApartmentFormScreenState extends State<ApartmentFormScreen> {
             onChanged: (v) => setState(() => _occupied = v),
           ),
           const SizedBox(height: 20),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('Cancel'),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: FilledButton(
-                  onPressed: _save,
-                  child: const Text('Save'),
-                ),
-              ),
-            ],
+          AppFormActions(
+            onCancel: () => Navigator.of(context).pop(),
+            onSave: _save,
           ),
         ],
       ),

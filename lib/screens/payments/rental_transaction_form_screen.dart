@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:estatetrack1/data/rental_transaction_builder.dart';
 import 'package:estatetrack1/models/apartment_return_model.dart';
+import 'package:estatetrack1/models/building_model.dart';
 import 'package:estatetrack1/models/customer_model.dart';
 import 'package:estatetrack1/models/apartment_model.dart';
 import 'package:estatetrack1/models/rental_booking_model.dart';
 import 'package:estatetrack1/models/rental_transaction_model.dart';
+import 'package:estatetrack1/ui/app_components.dart';
+import 'package:estatetrack1/utils/apartment_display.dart';
 
 class RentalTransactionFormScreen extends StatefulWidget {
   const RentalTransactionFormScreen({
@@ -12,6 +16,7 @@ class RentalTransactionFormScreen extends StatefulWidget {
     required this.bookings,
     required this.returns,
     required this.customers,
+    required this.buildings,
     required this.apartments,
   });
 
@@ -19,6 +24,7 @@ class RentalTransactionFormScreen extends StatefulWidget {
   final List<RentalBookingModel> bookings;
   final List<ApartmentReturnModel> returns;
   final List<CustomerModel> customers;
+  final List<BuildingModel> buildings;
   final List<ApartmentModel> apartments;
 
   @override
@@ -37,15 +43,14 @@ class _RentalTransactionFormScreenState
   int? _returnId;
   late String _status;
   DateTime _txnDate = DateTime.now();
+  double _currentPaid = 0;
 
   @override
   void initState() {
     super.initState();
     final e = widget.existing;
     _paymentDetails = TextEditingController(text: e?.paymentDetails ?? '');
-    _paidInitial = TextEditingController(
-      text: e != null ? e.paidInitialTotalDueAmount.toStringAsFixed(2) : '',
-    );
+    _paidInitial = TextEditingController();
     _actualTotal = TextEditingController(
       text: e != null ? e.actualTotalDueAmount.toStringAsFixed(2) : '',
     );
@@ -55,11 +60,71 @@ class _RentalTransactionFormScreenState
     _refunded = TextEditingController(
       text: e != null ? e.totalRefundedAmount.toStringAsFixed(2) : '0',
     );
-    _bookingId = e?.bookingId ??
+    _bookingId =
+        e?.bookingId ??
         (widget.bookings.isNotEmpty ? widget.bookings.first.bookingId : null);
     _returnId = e?.returnId;
     _status = e?.transactionStatus ?? 'Pending';
     _txnDate = e?.updatedTransactionDate ?? DateTime.now();
+    if (_bookingId != null) {
+      _prefillFromBooking(_bookingId!);
+    }
+  }
+
+  RentalBookingModel? _bookingById(int id) {
+    return widget.bookings.where((b) => b.bookingId == id).firstOrNull;
+  }
+
+  ApartmentReturnModel? _returnForBooking(int bookingId) {
+    return widget.returns.where((r) => r.bookingId == bookingId).firstOrNull;
+  }
+
+  void _prefillFromBooking(int bookingId) {
+    final booking = _bookingById(bookingId);
+    if (booking == null) return;
+
+    final relatedReturn = _returnForBooking(bookingId);
+    final total =
+        relatedReturn?.actualTotalDueAmount ?? booking.initialTotalDueAmount;
+    final paid = paidAmountForBooking(booking);
+    _currentPaid = paid;
+    final remaining = (total - paid).clamp(0.0, double.infinity);
+
+    _actualTotal.text = total.toStringAsFixed(2);
+    _remaining.text = remaining.toStringAsFixed(2);
+    _status = transactionStatusFor(paid: paid, total: total);
+    _paidInitial.clear();
+    _paymentDetails.clear();
+    if (relatedReturn != null) {
+      _returnId = relatedReturn.returnId;
+      _txnDate = relatedReturn.actualReturnDate;
+    }
+  }
+
+  void _recalculateTotals() {
+    final payment = double.tryParse(_paidInitial.text.replaceAll(',', '')) ?? 0;
+    final total = double.tryParse(_actualTotal.text.replaceAll(',', '')) ?? 0;
+    final paid = _currentPaid + payment;
+    final remaining = (total - paid).clamp(0.0, double.infinity);
+    final refunded = paid > total ? paid - total : 0.0;
+    _remaining.text = remaining.toStringAsFixed(2);
+    _refunded.text = refunded.toStringAsFixed(2);
+    _status = transactionStatusFor(paid: paid, total: total);
+  }
+
+  String? _combinedPaymentDetails({
+    required RentalBookingModel booking,
+    required double payment,
+  }) {
+    final existing = (booking.paymentDetails ?? booking.initialCheckNotes ?? '')
+        .trim();
+    final note = _paymentDetails.text.trim();
+    final date = _txnDate.toIso8601String().split('T').first;
+    final line =
+        '$date: received \$${payment.toStringAsFixed(2)}'
+        '${note.isEmpty ? '' : ' - $note'}';
+    if (existing.isEmpty) return line;
+    return '$existing\n$line';
   }
 
   @override
@@ -77,10 +142,11 @@ class _RentalTransactionFormScreenState
         .where((c) => c.customerId == b.customerId)
         .map((c) => c.name)
         .firstWhere((_) => true, orElse: () => 'Customer ${b.customerId}');
-    final apt = widget.apartments
-        .where((a) => a.apartmentId == b.apartmentId)
-        .map((a) => a.number ?? '#${a.apartmentId}')
-        .firstWhere((_) => true, orElse: () => 'Apt ${b.apartmentId}');
+    final apt = apartmentDisplayLabelById(
+      b.apartmentId,
+      widget.apartments,
+      widget.buildings,
+    );
     return 'Booking ${b.bookingId} · $cust · $apt';
   }
 
@@ -120,13 +186,25 @@ class _RentalTransactionFormScreenState
 
   void _save() {
     if (_bookingId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Select a booking')),
-      );
+      AppSnackbars.error(context, 'Select a booking');
       return;
     }
-    final paid = double.tryParse(_paidInitial.text.replaceAll(',', '')) ?? 0;
+    final booking = _bookingById(_bookingId!);
+    if (booking == null) {
+      AppSnackbars.error(context, 'Selected booking was not found');
+      return;
+    }
+    final payment = double.tryParse(_paidInitial.text.replaceAll(',', '')) ?? 0;
     final actual = double.tryParse(_actualTotal.text.replaceAll(',', '')) ?? 0;
+    if (payment <= 0) {
+      AppSnackbars.error(context, 'Payment received must be greater than zero');
+      return;
+    }
+    if (actual <= 0) {
+      AppSnackbars.error(context, 'Total due must be greater than zero');
+      return;
+    }
+    final paid = _currentPaid + payment;
     final remain = double.tryParse(_remaining.text.replaceAll(',', '')) ?? 0;
     final refund = double.tryParse(_refunded.text.replaceAll(',', '')) ?? 0;
 
@@ -142,9 +220,10 @@ class _RentalTransactionFormScreenState
         totalRefundedAmount: refund,
         transactionStatus: _status,
         updatedTransactionDate: _txnDate,
-        paymentDetails: _paymentDetails.text.trim().isEmpty
-            ? null
-            : _paymentDetails.text.trim(),
+        paymentDetails: _combinedPaymentDetails(
+          booking: booking,
+          payment: payment,
+        ),
       ),
     );
   }
@@ -155,14 +234,11 @@ class _RentalTransactionFormScreenState
     if (widget.bookings.isEmpty) {
       return Scaffold(
         appBar: AppBar(title: const Text('Rental transaction')),
-        body: const Center(
-          child: Padding(
-            padding: EdgeInsets.all(24),
-            child: Text(
-              'Create a contract (with a booking) first, then you can record rental transactions.',
-              textAlign: TextAlign.center,
-            ),
-          ),
+        body: const AppEmptyState(
+          icon: Icons.handshake_outlined,
+          title: 'No bookings yet',
+          message:
+              'Create a lease agreement (with a booking) first, then you can record payments.',
         ),
       );
     }
@@ -172,11 +248,17 @@ class _RentalTransactionFormScreenState
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(isEdit ? 'Edit rental transaction' : 'New rental transaction'),
+        title: Text(isEdit ? 'Receive another payment' : 'Receive payment'),
       ),
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
+          const AppFlowBanner(
+            icon: Icons.sync_alt_rounded,
+            text:
+                'Enter the new amount received. The app adds it to the booking paid total and recalculates the remaining balance.',
+          ),
+          const SizedBox(height: 16),
           _labeledDropdown<int>(
             label: 'Booking',
             icon: Icons.book_online_outlined,
@@ -190,6 +272,7 @@ class _RentalTransactionFormScreenState
             onChanged: (v) => setState(() {
               _bookingId = v;
               _returnId = null;
+              if (v != null) _prefillFromBooking(v);
             }),
           ),
           const SizedBox(height: 12),
@@ -214,38 +297,45 @@ class _RentalTransactionFormScreenState
             onChanged: (v) => setState(() => _returnId = v),
           ),
           const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  'Transaction date: ${_txnDate.toString().split(' ')[0]}',
-                ),
-              ),
-              TextButton(onPressed: _pickDate, child: const Text('Change')),
-            ],
+          AppDateField(
+            label: 'Transaction date',
+            date: _txnDate,
+            onPick: _pickDate,
+          ),
+          const SizedBox(height: 12),
+          InputDecorator(
+            decoration: const InputDecoration(
+              labelText: 'Already paid',
+              prefixIcon: Icon(Icons.account_balance_wallet_outlined),
+              border: OutlineInputBorder(),
+            ),
+            child: Text('\$${_currentPaid.toStringAsFixed(2)}'),
           ),
           const SizedBox(height: 12),
           TextField(
             controller: _paidInitial,
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            onChanged: (_) => setState(_recalculateTotals),
             decoration: const InputDecoration(
-              labelText: 'Paid initial / installment amount',
+              labelText: 'Payment received now',
               prefixIcon: Icon(Icons.payments_outlined),
+              helperText: 'This amount is added to the existing paid total',
             ),
           ),
           const SizedBox(height: 12),
           TextField(
             controller: _actualTotal,
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            onChanged: (_) => setState(_recalculateTotals),
             decoration: const InputDecoration(
-              labelText: 'Actual total due amount',
+              labelText: 'Total due (booking or return)',
               prefixIcon: Icon(Icons.calculate_outlined),
             ),
           ),
           const SizedBox(height: 12),
           TextField(
             controller: _remaining,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            readOnly: true,
             decoration: const InputDecoration(
               labelText: 'Total remaining',
               prefixIcon: Icon(Icons.hourglass_bottom_outlined),
@@ -254,36 +344,32 @@ class _RentalTransactionFormScreenState
           const SizedBox(height: 12),
           TextField(
             controller: _refunded,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            readOnly: true,
             decoration: const InputDecoration(
               labelText: 'Total refunded',
               prefixIcon: Icon(Icons.replay_outlined),
             ),
           ),
           const SizedBox(height: 12),
-          _labeledDropdown<String>(
-            label: 'Transaction status',
-            icon: Icons.flag_outlined,
-            value: _status,
-            items: ['Pending', 'Partial', 'Paid', 'Refunded', 'Closed']
-                .map((s) => DropdownMenuItem(value: s, child: Text(s)))
-                .toList(),
-            onChanged: (v) => setState(() => _status = v ?? 'Pending'),
+          InputDecorator(
+            decoration: const InputDecoration(
+              labelText: 'Transaction status',
+              prefixIcon: Icon(Icons.flag_outlined),
+              border: OutlineInputBorder(),
+            ),
+            child: Text(_status),
           ),
           const SizedBox(height: 12),
           TextField(
             controller: _paymentDetails,
             maxLines: 3,
             decoration: const InputDecoration(
-              labelText: 'Payment details',
+              labelText: 'Payment note',
               prefixIcon: Icon(Icons.notes_outlined),
             ),
           ),
           const SizedBox(height: 24),
-          FilledButton(
-            onPressed: _save,
-            child: Text(isEdit ? 'Update transaction' : 'Save transaction'),
-          ),
+          FilledButton(onPressed: _save, child: const Text('Save payment')),
         ],
       ),
     );

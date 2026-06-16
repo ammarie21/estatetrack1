@@ -41,8 +41,7 @@ class _RentalCalendarScreenState extends State<RentalCalendarScreen> {
 
   static DateTime _dateOnly(DateTime d) => DateTime(d.year, d.month, d.day);
 
-  bool _sameDay(DateTime a, DateTime b) =>
-      _dateOnly(a) == _dateOnly(b);
+  bool _sameDay(DateTime a, DateTime b) => _dateOnly(a) == _dateOnly(b);
 
   String _customerName(int customerId) {
     for (final c in widget.customers) {
@@ -76,8 +75,9 @@ class _RentalCalendarScreenState extends State<RentalCalendarScreen> {
   bool _isReturnDay(DateTime day) =>
       widget.returns.any((r) => _sameDay(r.actualReturnDate, day));
 
-  bool _isPaymentDay(DateTime day) => widget.rentalTransactions
-      .any((t) => _sameDay(t.updatedTransactionDate, day));
+  bool _isPaymentDay(DateTime day) => widget.rentalTransactions.any(
+    (t) => _sameDay(t.updatedTransactionDate, day),
+  );
 
   List<ContractModel> _contractsForDay(DateTime day) {
     return widget.contracts.where((c) {
@@ -88,10 +88,10 @@ class _RentalCalendarScreenState extends State<RentalCalendarScreen> {
   List<ApartmentReturnModel> _returnsForDay(DateTime day) =>
       widget.returns.where((r) => _sameDay(r.actualReturnDate, day)).toList();
 
-  List<RentalTransactionModel> _paymentsForDay(DateTime day) =>
-      widget.rentalTransactions
-          .where((t) => _sameDay(t.updatedTransactionDate, day))
-          .toList();
+  List<RentalTransactionModel> _paymentsForDay(DateTime day) => widget
+      .rentalTransactions
+      .where((t) => _sameDay(t.updatedTransactionDate, day))
+      .toList();
 
   void _previousMonth() {
     setState(() {
@@ -115,38 +115,42 @@ class _RentalCalendarScreenState extends State<RentalCalendarScreen> {
 
     for (final c in widget.contracts) {
       if (_inFocusedMonth(c.startDate)) {
-        allEvents.add(_CalendarEvent(
-          date: c.startDate,
-          type: _EventType.start,
-          contract: c,
-        ));
+        allEvents.add(
+          _CalendarEvent(
+            date: c.startDate,
+            type: _EventType.start,
+            contract: c,
+          ),
+        );
       }
       if (_inFocusedMonth(c.endDate)) {
-        allEvents.add(_CalendarEvent(
-          date: c.endDate,
-          type: _EventType.end,
-          contract: c,
-        ));
+        allEvents.add(
+          _CalendarEvent(date: c.endDate, type: _EventType.end, contract: c),
+        );
       }
     }
 
     for (final r in widget.returns) {
       if (_inFocusedMonth(r.actualReturnDate)) {
-        allEvents.add(_CalendarEvent(
-          date: r.actualReturnDate,
-          type: _EventType.returnEvent,
-          returnModel: r,
-        ));
+        allEvents.add(
+          _CalendarEvent(
+            date: r.actualReturnDate,
+            type: _EventType.returnEvent,
+            returnModel: r,
+          ),
+        );
       }
     }
 
     for (final t in widget.rentalTransactions) {
       if (_inFocusedMonth(t.updatedTransactionDate)) {
-        allEvents.add(_CalendarEvent(
-          date: t.updatedTransactionDate,
-          type: _EventType.payment,
-          transaction: t,
-        ));
+        allEvents.add(
+          _CalendarEvent(
+            date: t.updatedTransactionDate,
+            type: _EventType.payment,
+            transaction: t,
+          ),
+        );
       }
     }
 
@@ -191,10 +195,9 @@ class _RentalCalendarScreenState extends State<RentalCalendarScreen> {
         if (selectedContracts.isNotEmpty) ...[
           Text(
             'Agreements',
-            style: Theme.of(context)
-                .textTheme
-                .labelLarge
-                ?.copyWith(color: scheme.onSurfaceVariant),
+            style: Theme.of(
+              context,
+            ).textTheme.labelLarge?.copyWith(color: scheme.onSurfaceVariant),
           ),
           const SizedBox(height: 8),
           ...selectedContracts.map((c) {
@@ -208,9 +211,7 @@ class _RentalCalendarScreenState extends State<RentalCalendarScreen> {
                         ? Colors.green.shade100
                         : Colors.red.shade100,
                     child: Icon(
-                      isStart
-                          ? Icons.play_arrow_rounded
-                          : Icons.flag_rounded,
+                      isStart ? Icons.play_arrow_rounded : Icons.flag_rounded,
                       color: isStart
                           ? Colors.green.shade700
                           : Colors.red.shade700,
@@ -255,55 +256,55 @@ class _RentalCalendarScreenState extends State<RentalCalendarScreen> {
         if (selectedReturns.isNotEmpty) ...[
           Text(
             'Returns',
-            style: Theme.of(context)
-                .textTheme
-                .labelLarge
-                ?.copyWith(color: scheme.onSurfaceVariant),
+            style: Theme.of(
+              context,
+            ).textTheme.labelLarge?.copyWith(color: scheme.onSurfaceVariant),
           ),
           const SizedBox(height: 8),
-          ...selectedReturns.map((r) => Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: Card(
-                  child: ListTile(
-                    leading: CircleAvatar(
-                      backgroundColor: Colors.purple.shade100,
-                      child: Icon(
-                        Icons.logout_rounded,
-                        color: Colors.purple.shade700,
-                        size: 20,
-                      ),
-                    ),
-                    title: Text(
-                      'Return #${r.returnId}',
-                      style: const TextStyle(fontWeight: FontWeight.w600),
-                    ),
-                    subtitle: Text(
-                      r.bookingId != null
-                          ? 'Booking #${r.bookingId}'
-                          : 'Booking not linked',
-                    ),
-                    trailing: Chip(
-                      label: Text(
-                        '\$${r.actualTotalDueAmount.toStringAsFixed(0)}',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.purple.shade700,
-                        ),
-                      ),
-                      backgroundColor: Colors.purple.shade100,
-                      side: BorderSide.none,
+          ...selectedReturns.map(
+            (r) => Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Card(
+                child: ListTile(
+                  leading: CircleAvatar(
+                    backgroundColor: Colors.purple.shade100,
+                    child: Icon(
+                      Icons.logout_rounded,
+                      color: Colors.purple.shade700,
+                      size: 20,
                     ),
                   ),
+                  title: Text(
+                    'Return #${r.returnId}',
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                  subtitle: Text(
+                    r.bookingId != null
+                        ? 'Booking #${r.bookingId}'
+                        : 'Booking not linked',
+                  ),
+                  trailing: Chip(
+                    label: Text(
+                      '\$${r.actualTotalDueAmount.toStringAsFixed(0)}',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.purple.shade700,
+                      ),
+                    ),
+                    backgroundColor: Colors.purple.shade100,
+                    side: BorderSide.none,
+                  ),
                 ),
-              )),
+              ),
+            ),
+          ),
         ],
         if (selectedPayments.isNotEmpty) ...[
           Text(
             'Payments',
-            style: Theme.of(context)
-                .textTheme
-                .labelLarge
-                ?.copyWith(color: scheme.onSurfaceVariant),
+            style: Theme.of(
+              context,
+            ).textTheme.labelLarge?.copyWith(color: scheme.onSurfaceVariant),
           ),
           const SizedBox(height: 8),
           ...selectedPayments.map((t) {
@@ -404,30 +405,21 @@ class _RentalCalendarScreenState extends State<RentalCalendarScreen> {
         ),
         title: Text(
           '${event.date.day} ${_monthName(_focusedMonth.month)}',
-          style: TextStyle(
-            fontSize: 12,
-            color: scheme.onSurfaceVariant,
-          ),
+          style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
         ),
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
               title,
-              style: const TextStyle(
-                fontWeight: FontWeight.w600,
-                fontSize: 14,
-              ),
+              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
             ),
             Text(subtitle),
           ],
         ),
         isThreeLine: true,
         trailing: Chip(
-          label: Text(
-            label,
-            style: TextStyle(fontSize: 12, color: color),
-          ),
+          label: Text(label, style: TextStyle(fontSize: 12, color: color)),
           backgroundColor: color.withValues(alpha: 0.15),
           side: BorderSide.none,
         ),
@@ -441,8 +433,11 @@ class _RentalCalendarScreenState extends State<RentalCalendarScreen> {
     final now = DateTime.now();
 
     final firstDay = DateTime(_focusedMonth.year, _focusedMonth.month, 1);
-    final daysInMonth =
-        DateTime(_focusedMonth.year, _focusedMonth.month + 1, 0).day;
+    final daysInMonth = DateTime(
+      _focusedMonth.year,
+      _focusedMonth.month + 1,
+      0,
+    ).day;
     final startWeekday = firstDay.weekday % 7;
 
     return Column(
@@ -458,10 +453,9 @@ class _RentalCalendarScreenState extends State<RentalCalendarScreen> {
               ),
               Text(
                 '${_monthName(_focusedMonth.month)} ${_focusedMonth.year}',
-                style: Theme.of(context)
-                    .textTheme
-                    .titleMedium
-                    ?.copyWith(fontWeight: FontWeight.bold),
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
               ),
               IconButton(
                 icon: const Icon(Icons.chevron_right),
@@ -487,18 +481,20 @@ class _RentalCalendarScreenState extends State<RentalCalendarScreen> {
           padding: const EdgeInsets.symmetric(horizontal: 12),
           child: Row(
             children: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
-                .map((d) => Expanded(
-                      child: Center(
-                        child: Text(
-                          d,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: scheme.onSurfaceVariant,
-                            fontWeight: FontWeight.w600,
-                          ),
+                .map(
+                  (d) => Expanded(
+                    child: Center(
+                      child: Text(
+                        d,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: scheme.onSurfaceVariant,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
-                    ))
+                    ),
+                  ),
+                )
                 .toList(),
           ),
         ),
@@ -518,8 +514,11 @@ class _RentalCalendarScreenState extends State<RentalCalendarScreen> {
             itemBuilder: (context, index) {
               if (index < startWeekday) return const SizedBox.shrink();
               final day = index - startWeekday + 1;
-              final date =
-                  DateTime(_focusedMonth.year, _focusedMonth.month, day);
+              final date = DateTime(
+                _focusedMonth.year,
+                _focusedMonth.month,
+                day,
+              );
               final isToday = _sameDay(date, now);
               final isSelected =
                   _selectedDay != null && _sameDay(date, _selectedDay!);
@@ -535,8 +534,8 @@ class _RentalCalendarScreenState extends State<RentalCalendarScreen> {
                     color: isSelected
                         ? scheme.primary
                         : isToday
-                            ? scheme.primaryContainer
-                            : Colors.transparent,
+                        ? scheme.primaryContainer
+                        : Colors.transparent,
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Column(
@@ -550,8 +549,8 @@ class _RentalCalendarScreenState extends State<RentalCalendarScreen> {
                           color: isSelected
                               ? scheme.onPrimary
                               : isToday
-                                  ? scheme.onPrimaryContainer
-                                  : scheme.onSurface,
+                              ? scheme.onPrimaryContainer
+                              : scheme.onSurface,
                         ),
                       ),
                       if (isStart || isEnd || isReturn || isPayment)
@@ -587,20 +586,20 @@ class _RentalCalendarScreenState extends State<RentalCalendarScreen> {
   }
 
   String _monthName(int month) => const [
-        '',
-        'January',
-        'February',
-        'March',
-        'April',
-        'May',
-        'June',
-        'July',
-        'August',
-        'September',
-        'October',
-        'November',
-        'December'
-      ][month];
+    '',
+    'January',
+    'February',
+    'March',
+    'April',
+    'May',
+    'June',
+    'July',
+    'August',
+    'September',
+    'October',
+    'November',
+    'December',
+  ][month];
 }
 
 enum _EventType { start, end, returnEvent, payment }
@@ -630,10 +629,7 @@ class _Dot extends StatelessWidget {
     return Container(
       width: 5,
       height: 5,
-      decoration: BoxDecoration(
-        color: color,
-        shape: BoxShape.circle,
-      ),
+      decoration: BoxDecoration(color: color, shape: BoxShape.circle),
     );
   }
 }
@@ -651,10 +647,7 @@ class _LegendDot extends StatelessWidget {
         Container(
           width: 10,
           height: 10,
-          decoration: BoxDecoration(
-            color: color,
-            shape: BoxShape.circle,
-          ),
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
         ),
         const SizedBox(width: 4),
         Text(label, style: const TextStyle(fontSize: 12)),

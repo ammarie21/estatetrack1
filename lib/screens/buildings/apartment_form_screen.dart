@@ -1,16 +1,21 @@
 import 'package:flutter/material.dart';
 
+import 'package:estatetrack1/data/estate_api.dart';
 import 'package:estatetrack1/models/apartment_model.dart';
+import 'package:estatetrack1/models/apartment_type_model.dart';
+import 'package:estatetrack1/ui/app_components.dart';
 
 class ApartmentFormScreen extends StatefulWidget {
   const ApartmentFormScreen({
     super.key,
     this.existing,
     required this.buildingId,
+    this.apartmentTypes = const [],
   });
 
   final ApartmentModel? existing;
   final int buildingId;
+  final List<ApartmentTypeModel> apartmentTypes;
 
   @override
   State<ApartmentFormScreen> createState() => _ApartmentFormScreenState();
@@ -30,6 +35,10 @@ class _ApartmentFormScreenState extends State<ApartmentFormScreen> {
   late bool _hasInternet;
   late bool _parking;
   late bool _elevator;
+  List<ApartmentTypeModel> _types = [];
+  int _typeId = 1;
+  bool _loadingTypes = true;
+  String? _typesError;
 
   @override
   void initState() {
@@ -38,8 +47,12 @@ class _ApartmentFormScreenState extends State<ApartmentFormScreen> {
     _number = TextEditingController(text: e?.number ?? '');
     _location = TextEditingController(text: e?.location ?? '');
     _sizeM2 = TextEditingController(text: e?.sizeM2.toString() ?? '');
-    _rentPerMonth = TextEditingController(text: e?.rentPricePerMonth.toString() ?? '');
-    _rentPerDay = TextEditingController(text: e?.rentPricePerDay.toString() ?? '');
+    _rentPerMonth = TextEditingController(
+      text: e?.rentPricePerMonth.toString() ?? '',
+    );
+    _rentPerDay = TextEditingController(
+      text: e?.rentPricePerDay.toString() ?? '',
+    );
     _bedrooms = TextEditingController(text: e?.bedrooms.toString() ?? '');
     _bathrooms = TextEditingController(text: e?.bathrooms.toString() ?? '');
     _isAvailable = e?.isAvailable ?? true;
@@ -48,6 +61,42 @@ class _ApartmentFormScreenState extends State<ApartmentFormScreen> {
     _hasInternet = e?.hasInternet ?? false;
     _parking = e?.parking ?? false;
     _elevator = e?.elevator ?? false;
+    _typeId = e?.typeId ?? 1;
+    if (widget.apartmentTypes.isNotEmpty) {
+      _types = List.from(widget.apartmentTypes);
+      _loadingTypes = false;
+      if (!widget.apartmentTypes.any((t) => t.typeId == _typeId)) {
+        _typeId = widget.apartmentTypes.first.typeId;
+      }
+    } else {
+      _loadTypes();
+    }
+  }
+
+  Future<void> _loadTypes() async {
+    try {
+      final types = await EstateApi.instance.getApartmentTypes();
+      if (!mounted) return;
+      setState(() {
+        _types = types;
+        _loadingTypes = false;
+        if (types.isNotEmpty && !types.any((t) => t.typeId == _typeId)) {
+          _typeId = types.first.typeId;
+        }
+      });
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _typesError = e.message;
+        _loadingTypes = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _typesError = e.toString();
+        _loadingTypes = false;
+      });
+    }
   }
 
   @override
@@ -70,8 +119,13 @@ class _ApartmentFormScreenState extends State<ApartmentFormScreen> {
     final bathrooms = int.tryParse(_bathrooms.text) ?? 1;
 
     if (_number.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter apartment number')),
+      AppSnackbars.error(context, 'Please enter apartment number');
+      return;
+    }
+    if (sizeM2 <= 0 || rentPerMonth <= 0) {
+      AppSnackbars.error(
+        context,
+        'Size and monthly rent must be greater than zero',
       );
       return;
     }
@@ -80,7 +134,7 @@ class _ApartmentFormScreenState extends State<ApartmentFormScreen> {
     final model = ApartmentModel(
       apartmentId: e?.apartmentId ?? 0,
       buildingId: widget.buildingId,
-      typeId: 1, // Default type
+      typeId: _typeId,
       sizeM2: sizeM2,
       rentPricePerMonth: rentPerMonth,
       rentPricePerDay: rentPerDay,
@@ -102,9 +156,7 @@ class _ApartmentFormScreenState extends State<ApartmentFormScreen> {
   Widget build(BuildContext context) {
     final isEdit = widget.existing != null;
     return Scaffold(
-      appBar: AppBar(
-        title: Text(isEdit ? 'Edit Apartment' : 'Add Apartment'),
-      ),
+      appBar: AppBar(title: Text(isEdit ? 'Edit Apartment' : 'Add Apartment')),
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
@@ -123,6 +175,35 @@ class _ApartmentFormScreenState extends State<ApartmentFormScreen> {
               prefixIcon: Icon(Icons.place_outlined),
             ),
           ),
+          const SizedBox(height: 12),
+          if (_loadingTypes)
+            const LinearProgressIndicator()
+          else if (_typesError != null)
+            Text(
+              'Could not load apartment types: $_typesError',
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            )
+          else if (_types.isEmpty)
+            const Text('No apartment types in backend. Create one first.')
+          else
+            DropdownButtonFormField<int>(
+              initialValue: _typeId,
+              decoration: const InputDecoration(
+                labelText: 'Apartment Type',
+                prefixIcon: Icon(Icons.category_outlined),
+              ),
+              items: _types
+                  .map(
+                    (t) => DropdownMenuItem(
+                      value: t.typeId,
+                      child: Text(t.apartmentType),
+                    ),
+                  )
+                  .toList(),
+              onChanged: (value) {
+                if (value != null) setState(() => _typeId = value);
+              },
+            ),
           const SizedBox(height: 12),
           TextField(
             controller: _sizeM2,

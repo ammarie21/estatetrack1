@@ -2,18 +2,22 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/io_client.dart';
 
+import 'package:estatetrack1/config/api_config.dart';
 import 'package:estatetrack1/models/account_model.dart';
+import 'package:estatetrack1/models/apartment_type_model.dart';
 import 'package:estatetrack1/models/apartment_model.dart';
 import 'package:estatetrack1/models/apartment_return_model.dart';
 import 'package:estatetrack1/models/building_model.dart';
 import 'package:estatetrack1/models/contract_model.dart';
 import 'package:estatetrack1/models/customer_model.dart';
-import 'package:estatetrack1/models/expense_model.dart';
 import 'package:estatetrack1/models/maintenance_model.dart';
 import 'package:estatetrack1/models/rental_booking_model.dart';
+import 'package:estatetrack1/data/contract_builder.dart';
+import 'package:estatetrack1/data/rental_transaction_builder.dart';
 import 'package:estatetrack1/models/rental_transaction_model.dart';
 import 'package:estatetrack1/models/user_model.dart';
 
@@ -33,22 +37,22 @@ class EstateSnapshot {
     required this.customers,
     required this.buildings,
     required this.apartments,
+    required this.apartmentTypes,
     required this.bookings,
     required this.contracts,
     required this.returns,
     required this.rentalTransactions,
-    required this.expenses,
     required this.maintenance,
   });
 
   final List<CustomerModel> customers;
   final List<BuildingModel> buildings;
   final List<ApartmentModel> apartments;
+  final List<ApartmentTypeModel> apartmentTypes;
   final List<RentalBookingModel> bookings;
   final List<ContractModel> contracts;
   final List<ApartmentReturnModel> returns;
   final List<RentalTransactionModel> rentalTransactions;
-  final List<ExpenseModel> expenses;
   final List<MaintenanceModel> maintenance;
 }
 
@@ -63,8 +67,7 @@ class EstateApi {
 
   static final EstateApi instance = EstateApi._();
 
-  static const String baseUrl = 'https://localhost:7274';
-  static const Duration _timeout = Duration(seconds: 25);
+  static const Duration _timeout = ApiConfig.requestTimeout;
 
   final http.Client _client;
   AccountModel? currentUser;
@@ -104,6 +107,7 @@ class EstateApi {
       _getList('/api/Customers/All', _customerFromJson),
       _getList('/api/Buildings/All', _buildingFromJson),
       _getList('/api/Apartments/All', _apartmentFromJson),
+      _getList('/api/ApartmentTypes/All', _apartmentTypeFromJson),
       _getList('/api/RentalBookings/All', _bookingFromJson),
       _getList('/api/ApartmentReturns/All', _returnFromJson),
       _getList('/api/Maintenances/All', _maintenanceFromJson),
@@ -112,20 +116,22 @@ class EstateApi {
     final customers = results[0] as List<CustomerModel>;
     final buildings = results[1] as List<BuildingModel>;
     final apartments = results[2] as List<ApartmentModel>;
-    final bookings = results[3] as List<RentalBookingModel>;
-    final returns = results[4] as List<ApartmentReturnModel>;
-    final maintenance = results[5] as List<MaintenanceModel>;
-    final contracts = bookings.map(_contractFromBooking).toList();
+    final apartmentTypes = results[3] as List<ApartmentTypeModel>;
+    final bookings = results[4] as List<RentalBookingModel>;
+    final rawReturns = results[5] as List<ApartmentReturnModel>;
+    final maintenance = results[6] as List<MaintenanceModel>;
+    final returns = _decorateReturns(rawReturns, bookings);
+    final contracts = contractsFromBookings(bookings, returns);
 
     return EstateSnapshot(
       customers: _decorateCustomers(customers, bookings, apartments),
       buildings: buildings,
       apartments: apartments,
+      apartmentTypes: apartmentTypes,
       bookings: bookings,
       contracts: contracts,
       returns: returns,
-      rentalTransactions: _transactionsFromBookings(bookings, returns),
-      expenses: const [],
+      rentalTransactions: buildTransactionsFromBookings(bookings, returns),
       maintenance: maintenance,
     );
   }
@@ -195,6 +201,35 @@ class EstateApi {
   Future<List<UserModel>> getUsers() =>
       _getList('/api/Users/All', _userFromJson);
 
+  Future<List<ApartmentTypeModel>> getApartmentTypes() =>
+      _getList('/api/ApartmentTypes/All', _apartmentTypeFromJson);
+
+  Future<ApartmentTypeModel> createApartmentType(
+    ApartmentTypeModel type,
+  ) async {
+    final response = await _post(
+      '/api/ApartmentTypes',
+      _apartmentTypeToJson(type.copyWith(typeId: 0)),
+    );
+    final saved = _apartmentTypeFromJson(_decodeMap(response!.body));
+    _requirePositiveId(saved.typeId, 'Apartment type');
+    return saved;
+  }
+
+  Future<ApartmentTypeModel> updateApartmentType(
+    ApartmentTypeModel type,
+  ) async {
+    final response = await _put(
+      '/api/ApartmentTypes/${type.typeId}',
+      _apartmentTypeToJson(type),
+    );
+    return _apartmentTypeFromJson(_decodeMap(response.body));
+  }
+
+  Future<void> deleteApartmentType(int id) async {
+    await _delete('/api/ApartmentTypes/$id');
+  }
+
   Future<UserModel> createUser(UserModel user) async {
     final response = await _post('/api/Users', _userToJson(user));
     final saved = _userFromJson(_decodeMap(response!.body));
@@ -236,29 +271,74 @@ class EstateApi {
   Future<ApartmentReturnModel> createReturn(
     ApartmentReturnModel model, {
     required int userId,
+    double paidOnBooking = 0,
   }) async {
-    final response = await _post(
-      '/api/ApartmentReturns',
-      _returnToJson(model, userId: userId),
+    final payload = _returnToJson(
+      model,
+      userId: userId,
+      paidOnBooking: paidOnBooking,
     );
-    final saved = _returnFromJson(_decodeMap(response!.body));
-    _requirePositiveId(saved.returnId, 'Apartment return');
-    return saved;
+
+    try {
+      final response = await _post('/api/ApartmentReturns', payload);
+      final saved = _returnFromJson(_decodeMap(response!.body));
+      _requirePositiveId(saved.returnId, 'Apartment return');
+      return saved;
+    } on ApiException catch (e) {
+      if (e.statusCode != 500 || model.bookingId == null) rethrow;
+      final recovered = await _findReturnByBookingId(model.bookingId!);
+      if (recovered != null) return recovered;
+      rethrow;
+    }
+  }
+
+  Future<ApartmentReturnModel?> _findReturnByBookingId(int bookingId) async {
+    final returns = await _getList(
+      '/api/ApartmentReturns/All',
+      _returnFromJson,
+    );
+    return returns.where((r) => r.bookingId == bookingId).firstOrNull;
   }
 
   Future<ApartmentReturnModel> updateReturn(
     ApartmentReturnModel model, {
     required int userId,
+    double paidOnBooking = 0,
+  }) {
+    // Backend UpdateReturn SQL is unreliable, so edits use delete + recreate.
+    return replaceReturn(model, userId: userId, paidOnBooking: paidOnBooking);
+  }
+
+  Future<ApartmentReturnModel> replaceReturn(
+    ApartmentReturnModel model, {
+    required int userId,
+    double paidOnBooking = 0,
   }) async {
-    final response = await _put(
-      '/api/ApartmentReturns/${model.returnId}',
-      _returnToJson(model, userId: userId),
+    if (model.returnId > 0) {
+      await deleteReturn(model.returnId);
+    }
+    return createReturn(
+      model.copyWith(returnId: 0),
+      userId: userId,
+      paidOnBooking: paidOnBooking,
     );
-    return _returnFromJson(_decodeMap(response.body));
   }
 
   Future<void> deleteReturn(int id) async {
     await _delete('/api/ApartmentReturns/$id');
+  }
+
+  Future<RentalBookingModel> saveBookingPayment({
+    required RentalBookingModel booking,
+    required double paidAmount,
+    String? paymentDetails,
+  }) {
+    return updateBooking(
+      booking.copyWith(
+        rentalPrice: paidAmount,
+        paymentDetails: paymentDetails ?? '',
+      ),
+    );
   }
 
   Future<MaintenanceModel> createMaintenance(
@@ -339,7 +419,7 @@ class EstateApi {
         .toList();
   }
 
-  Uri _uri(String path) => Uri.parse('$baseUrl$path');
+  Uri _uri(String path) => Uri.parse('${ApiConfig.baseUrl}$path');
 
   Map<String, String> get _headers => const {
     'Accept': 'application/json',
@@ -376,6 +456,17 @@ class EstateApi {
       return trimmed;
     }
   }
+}
+
+ApartmentTypeModel _apartmentTypeFromJson(Map<String, dynamic> json) {
+  return ApartmentTypeModel(
+    typeId: _int(json['typeID']),
+    apartmentType: _string(json['apartmentType']),
+  );
+}
+
+Map<String, dynamic> _apartmentTypeToJson(ApartmentTypeModel type) {
+  return {'typeID': type.typeId, 'apartmentType': type.apartmentType};
 }
 
 UserModel _userFromJson(Map<String, dynamic> json) {
@@ -443,6 +534,8 @@ Map<String, dynamic> _buildingToJson(BuildingModel building) {
 
 ApartmentModel _apartmentFromJson(Map<String, dynamic> json) {
   final id = _int(json['apartmentID']);
+  final notes = _nullableString(json['notes']);
+  final description = _nullableString(json['description']);
   return ApartmentModel(
     apartmentId: id,
     buildingId: _int(json['buildingID']),
@@ -458,9 +551,10 @@ ApartmentModel _apartmentFromJson(Map<String, dynamic> json) {
     hasInternet: _bool(json['hasInternet']),
     parking: _bool(json['parking']),
     elevator: _bool(json['elevator']),
-    notes: _nullableString(json['notes']),
-    description: _nullableString(json['description']),
-    number: '#$id',
+    notes: notes,
+    description: description,
+    number: notes ?? '#$id',
+    location: description,
   );
 }
 
@@ -496,6 +590,9 @@ RentalBookingModel _bookingFromJson(Map<String, dynamic> json) {
     initialTotalDueAmount: _double(json['initialTotalDueAmount']),
     bookingType: _int(json['bookingType']),
     periodFee: _double(json['periodFee']),
+    rentalPrice: _double(json['rentalPrice']),
+    paymentDetails: _nullableString(json['paymentDetails']),
+    isActive: _bool(json['isActive'], fallback: true),
     initialCheckNotes: _nullableString(json['initialCheckNotes']),
   );
 }
@@ -512,23 +609,24 @@ Map<String, dynamic> _bookingToJson(RentalBookingModel booking) {
     'initialCheckNotes': booking.initialCheckNotes ?? '',
     'bookingType': booking.bookingType,
     'periodFee': booking.periodFee,
-    'rentalPrice': booking.periodFee,
-    'paymentDetails': booking.initialCheckNotes ?? '',
-    'isActive': true,
+    'rentalPrice': booking.rentalPrice,
+    'paymentDetails': booking.paymentDetails ?? '',
+    'isActive': booking.isActive,
   };
 }
 
 ApartmentReturnModel _returnFromJson(Map<String, dynamic> json) {
-  final totalDue = _double(json['actualTotalDueAmount']);
   return ApartmentReturnModel(
     returnId: _int(json['returnID']),
     bookingId: _int(json['bookingID'], fallback: 0) == 0
         ? null
         : _int(json['bookingID']),
     actualReturnDate: _date(json['actualReturnDate']),
-    actualRentalDays: 0,
+    actualRentalDays: _int(json['actualRentalDays']),
     additionalCharges: _double(json['additionalCharges']),
-    actualTotalDueAmount: totalDue,
+    actualTotalDueAmount: _double(json['actualTotalDueAmount']),
+    totalRemaining: _double(json['totalRemaining']),
+    totalRefundedAmount: _double(json['totalRefundedAmount']),
     finalCheckNotes: _nullableString(json['finalCheckNotes']),
   );
 }
@@ -536,19 +634,25 @@ ApartmentReturnModel _returnFromJson(Map<String, dynamic> json) {
 Map<String, dynamic> _returnToJson(
   ApartmentReturnModel model, {
   required int userId,
+  double paidOnBooking = 0,
 }) {
+  final totalDue = model.actualTotalDueAmount;
+  final remaining = model.totalRemaining > 0
+      ? model.totalRemaining
+      : math.max(0, totalDue - paidOnBooking);
+  final refunded = model.totalRefundedAmount > 0
+      ? model.totalRefundedAmount
+      : math.max(0, paidOnBooking - totalDue);
+
   return {
     'returnID': model.returnId,
     'bookingID': model.bookingId ?? 0,
     'actualReturnDate': model.actualReturnDate.toIso8601String(),
     'finalCheckNotes': model.finalCheckNotes ?? '',
     'additionalCharges': model.additionalCharges,
-    'actualTotalDueAmount': model.actualTotalDueAmount,
-    'totalRemaining': math.max(
-      0,
-      model.actualTotalDueAmount - model.additionalCharges,
-    ),
-    'totalRefundedAmount': 0,
+    'actualTotalDueAmount': totalDue,
+    'totalRemaining': remaining,
+    'totalRefundedAmount': refunded,
     'userID': userId,
   };
 }
@@ -573,20 +677,6 @@ Map<String, dynamic> _maintenanceToJson(MaintenanceModel maintenance) {
         : '${maintenance.date}T00:00:00',
     'cost': maintenance.cost,
   };
-}
-
-ContractModel _contractFromBooking(RentalBookingModel booking) {
-  return ContractModel(
-    contractId: booking.bookingId,
-    customerId: booking.customerId,
-    apartmentId: booking.apartmentId,
-    startDate: booking.startDate,
-    endDate: booking.endDate,
-    totalAmount: booking.initialTotalDueAmount,
-    status: 'Active',
-    bookingId: booking.bookingId,
-    notes: booking.initialCheckNotes,
-  );
 }
 
 List<CustomerModel> _decorateCustomers(
@@ -615,29 +705,17 @@ List<CustomerModel> _decorateCustomers(
   }).toList();
 }
 
-List<RentalTransactionModel> _transactionsFromBookings(
-  List<RentalBookingModel> bookings,
+List<ApartmentReturnModel> _decorateReturns(
   List<ApartmentReturnModel> returns,
+  List<RentalBookingModel> bookings,
 ) {
-  return bookings.map((booking) {
-    final relatedReturn = returns
-        .where((r) => r.bookingId == booking.bookingId)
-        .firstOrNull;
-    final paid = booking.periodFee;
-    final total =
-        relatedReturn?.actualTotalDueAmount ?? booking.initialTotalDueAmount;
-    return RentalTransactionModel(
-      transactionId: booking.bookingId,
-      bookingId: booking.bookingId,
-      returnId: relatedReturn?.returnId,
-      paidInitialTotalDueAmount: paid,
-      actualTotalDueAmount: total,
-      totalRemaining: math.max(0, total - paid),
-      totalRefundedAmount: 0,
-      transactionStatus: paid >= total ? 'Paid' : 'Partial',
-      updatedTransactionDate: booking.startDate,
-      paymentDetails: booking.initialCheckNotes,
-    );
+  return returns.map((item) {
+    final bookingId = item.bookingId;
+    if (bookingId == null || item.actualRentalDays > 0) return item;
+    final booking = bookings.where((b) => b.bookingId == bookingId).firstOrNull;
+    if (booking == null) return item;
+    final days = item.actualReturnDate.difference(booking.startDate).inDays;
+    return item.copyWith(actualRentalDays: math.max(0, days));
   }).toList();
 }
 
@@ -681,3 +759,32 @@ DateTime _date(dynamic value) {
   return DateTime.tryParse(value?.toString() ?? '') ??
       DateTime.fromMillisecondsSinceEpoch(0);
 }
+
+// Test helpers keep JSON mapping covered without duplicating DTO rules.
+@visibleForTesting
+ApartmentTypeModel decodeApartmentTypeForTest(Map<String, dynamic> json) =>
+    _apartmentTypeFromJson(json);
+
+@visibleForTesting
+Map<String, dynamic> encodeApartmentTypeForTest(ApartmentTypeModel type) =>
+    _apartmentTypeToJson(type);
+
+@visibleForTesting
+CustomerModel decodeCustomerForTest(Map<String, dynamic> json) =>
+    _customerFromJson(json);
+
+@visibleForTesting
+Map<String, dynamic> encodeCustomerForTest(CustomerModel customer) =>
+    _customerToJson(customer);
+
+@visibleForTesting
+RentalBookingModel decodeBookingForTest(Map<String, dynamic> json) =>
+    _bookingFromJson(json);
+
+@visibleForTesting
+Map<String, dynamic> encodeBookingForTest(RentalBookingModel booking) =>
+    _bookingToJson(booking);
+
+@visibleForTesting
+ApartmentReturnModel decodeReturnForTest(Map<String, dynamic> json) =>
+    _returnFromJson(json);

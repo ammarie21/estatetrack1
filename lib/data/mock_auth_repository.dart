@@ -28,17 +28,14 @@ class MockAuthRepository {
 
   List<AccountModel> get accounts => List.unmodifiable(_accounts);
 
-  AccountModel? login({
-    required String identifier,
-    required String password,
-  }) {
+  AccountModel? login({required String identifier, required String password}) {
     final normalizedEmail = identifier.trim().toLowerCase();
     final normalizedPhone = identifier.trim();
     final normalizedPassword = password.trim();
     final account = _accounts.firstWhere(
-          (a) =>
-      (a.email.toLowerCase() == normalizedEmail ||
-          a.phone == normalizedPhone) &&
+      (a) =>
+          (a.email.toLowerCase() == normalizedEmail ||
+              a.phone == normalizedPhone) &&
           a.password == normalizedPassword,
       orElse: () => AccountModel(
         id: '',
@@ -125,12 +122,14 @@ class MockAuthRepository {
     }
     final account = _accounts[accountIndex];
     final emailTaken = _accounts.any(
-          (a) => a.id != id && a.email.toLowerCase() == normalizedEmail,
+      (a) => a.id != id && a.email.toLowerCase() == normalizedEmail,
     );
     if (emailTaken) {
       return 'Email already used by another account.';
     }
-    final phoneTaken = _accounts.any((a) => a.id != id && a.phone == normalizedPhone);
+    final phoneTaken = _accounts.any(
+      (a) => a.id != id && a.phone == normalizedPhone,
+    );
     if (phoneTaken) {
       return 'Phone already used by another account.';
     }
@@ -147,10 +146,7 @@ class MockAuthRepository {
     _accounts.removeWhere((a) => a.id == id);
   }
 
-  String? resetPassword({
-    required String id,
-    required String newPassword,
-  }) {
+  String? resetPassword({required String id, required String newPassword}) {
     final normalizedPassword = newPassword.trim();
     final ruleError = validatePasswordRules(normalizedPassword);
     if (ruleError != null) {
@@ -168,7 +164,9 @@ class MockAuthRepository {
     final normalizedEmail = identifier.trim().toLowerCase();
     final normalizedPhone = identifier.trim();
     final exists = _accounts.any(
-          (a) => a.email.toLowerCase() == normalizedEmail || a.phone == normalizedPhone,
+      (a) =>
+          a.email.toLowerCase() == normalizedEmail ||
+          a.phone == normalizedPhone,
     );
     if (!exists) {
       return 'No account found with this email/phone.';

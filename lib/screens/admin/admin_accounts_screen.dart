@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'package:estatetrack1/data/estate_api.dart';
 import 'package:estatetrack1/models/user_model.dart';
+import 'package:estatetrack1/ui/app_components.dart';
 
 class AdminAccountsScreen extends StatefulWidget {
   const AdminAccountsScreen({super.key});
@@ -158,11 +159,14 @@ class _AdminAccountsScreenState extends State<AdminAccountsScreen> {
                                 }
                               });
                               if (context.mounted) Navigator.of(context).pop();
-                            } on ApiException catch (e) {
-                              if (!context.mounted) return;
-                              ScaffoldMessenger.of(this.context).showSnackBar(
-                                SnackBar(content: Text(e.message)),
+                              if (!mounted) return;
+                              AppSnackbars.success(
+                                this.context,
+                                user == null ? 'User created' : 'User updated',
                               );
+                            } on ApiException catch (e) {
+                              if (!mounted) return;
+                              AppSnackbars.error(this.context, e.message);
                             }
                           },
                           child: Text(
@@ -234,14 +238,10 @@ class _AdminAccountsScreenState extends State<AdminAccountsScreen> {
           final i = _users.indexWhere((x) => x.userId == user.userId);
           if (i >= 0) _users[i] = saved;
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Password reset successfully.')),
-        );
+        AppSnackbars.success(context, 'Password reset successfully.');
       } on ApiException catch (e) {
         if (!mounted) return;
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(e.message)));
+        AppSnackbars.error(context, e.message);
       }
     }
     controller.dispose();
@@ -254,15 +254,12 @@ class _AdminAccountsScreenState extends State<AdminAccountsScreen> {
       return const Center(child: CircularProgressIndicator());
     }
     if (_error != null) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(_error!),
-            const SizedBox(height: 12),
-            FilledButton(onPressed: _loadUsers, child: const Text('Retry')),
-          ],
-        ),
+      return AppEmptyState(
+        icon: Icons.cloud_off_outlined,
+        title: 'Could not load accounts',
+        message: _error!,
+        actionLabel: 'Retry',
+        onAction: _loadUsers,
       );
     }
     return Column(
@@ -272,13 +269,11 @@ class _AdminAccountsScreenState extends State<AdminAccountsScreen> {
           child: Row(
             children: [
               Expanded(
-                child: TextField(
+                child: AppSearchField(
                   controller: _searchController,
+                  hint: 'Search accounts',
+                  padding: EdgeInsets.zero,
                   onChanged: (_) => setState(() {}),
-                  decoration: const InputDecoration(
-                    hintText: 'Search accounts',
-                    prefixIcon: Icon(Icons.search),
-                  ),
                 ),
               ),
               const SizedBox(width: 8),
@@ -291,51 +286,75 @@ class _AdminAccountsScreenState extends State<AdminAccountsScreen> {
           ),
         ),
         Expanded(
-          child: ListView.separated(
-            itemCount: users.length,
-            separatorBuilder: (_, index) => const Divider(height: 0),
-            itemBuilder: (context, index) {
-              final user = users[index];
-              return ListTile(
-                leading: CircleAvatar(child: Text(user.userId.toString())),
-                title: Text(user.name),
-                subtitle: Text(
-                  'Phone: ${user.phone}\nBackend UserID: ${user.userId}',
-                ),
-                isThreeLine: true,
-                trailing: PopupMenuButton<String>(
-                  onSelected: (value) async {
-                    if (value == 'edit') {
-                      _showAccountEditor(user: user);
-                    } else if (value == 'reset') {
-                      _resetPassword(user);
-                    } else if (value == 'delete') {
-                      try {
-                        await EstateApi.instance.deleteUser(user.userId);
-                        if (!mounted) return;
-                        setState(() {
-                          _users.removeWhere((x) => x.userId == user.userId);
-                        });
-                      } on ApiException catch (e) {
-                        if (!mounted) return;
-                        ScaffoldMessenger.of(
-                          this.context,
-                        ).showSnackBar(SnackBar(content: Text(e.message)));
-                      }
-                    }
+          child: users.isEmpty
+              ? const AppEmptyState(
+                  icon: Icons.manage_accounts_outlined,
+                  title: 'No matching accounts',
+                  message: 'Try a different name, phone number, or UserID.',
+                )
+              : ListView.separated(
+                  itemCount: users.length,
+                  separatorBuilder: (_, index) => const Divider(height: 0),
+                  itemBuilder: (context, index) {
+                    final user = users[index];
+                    return ListTile(
+                      leading: CircleAvatar(
+                        child: Text(user.userId.toString()),
+                      ),
+                      title: Text(user.name),
+                      subtitle: Text(
+                        'Phone: ${user.phone}\nBackend UserID: ${user.userId}',
+                      ),
+                      isThreeLine: true,
+                      trailing: PopupMenuButton<String>(
+                        onSelected: (value) async {
+                          if (value == 'edit') {
+                            _showAccountEditor(user: user);
+                          } else if (value == 'reset') {
+                            _resetPassword(user);
+                          } else if (value == 'delete') {
+                            final ok = await showAppConfirmDialog(
+                              context,
+                              title: 'Delete user?',
+                              message:
+                                  'Remove ${user.name} (UserID ${user.userId}) from the backend?',
+                              confirmLabel: 'Delete',
+                              destructive: true,
+                            );
+                            if (!ok || !mounted || !context.mounted) return;
+                            try {
+                              await EstateApi.instance.deleteUser(user.userId);
+                              if (!mounted || !context.mounted) return;
+                              setState(() {
+                                _users.removeWhere(
+                                  (x) => x.userId == user.userId,
+                                );
+                              });
+                              AppSnackbars.success(context, 'User deleted');
+                            } on ApiException catch (e) {
+                              if (!mounted || !context.mounted) return;
+                              AppSnackbars.error(context, e.message);
+                            }
+                          }
+                        },
+                        itemBuilder: (_) => [
+                          const PopupMenuItem(
+                            value: 'edit',
+                            child: Text('Edit'),
+                          ),
+                          const PopupMenuItem(
+                            value: 'reset',
+                            child: Text('Reset Password'),
+                          ),
+                          const PopupMenuItem(
+                            value: 'delete',
+                            child: Text('Delete'),
+                          ),
+                        ],
+                      ),
+                    );
                   },
-                  itemBuilder: (_) => [
-                    const PopupMenuItem(value: 'edit', child: Text('Edit')),
-                    const PopupMenuItem(
-                      value: 'reset',
-                      child: Text('Reset Password'),
-                    ),
-                    const PopupMenuItem(value: 'delete', child: Text('Delete')),
-                  ],
                 ),
-              );
-            },
-          ),
         ),
       ],
     );

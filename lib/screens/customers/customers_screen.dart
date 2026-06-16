@@ -2,16 +2,19 @@ import 'package:flutter/material.dart';
 import 'package:estatetrack1/data/estate_api.dart';
 import 'package:estatetrack1/models/customer_model.dart';
 import 'package:estatetrack1/screens/customers/customer_form_screen.dart';
+import 'package:estatetrack1/ui/app_components.dart';
 
 class CustomersScreen extends StatefulWidget {
   const CustomersScreen({
     super.key,
     required this.customers,
     required this.onCustomersChanged,
+    this.onRefresh,
   });
 
   final List<CustomerModel> customers;
   final void Function(List<CustomerModel>) onCustomersChanged;
+  final Future<void> Function()? onRefresh;
 
   @override
   State<CustomersScreen> createState() => _CustomersScreenState();
@@ -20,6 +23,7 @@ class CustomersScreen extends StatefulWidget {
 class _CustomersScreenState extends State<CustomersScreen> {
   late List<CustomerModel> _customers;
   bool _isSaving = false;
+  String _query = '';
 
   @override
   void initState() {
@@ -33,10 +37,14 @@ class _CustomersScreenState extends State<CustomersScreen> {
     _customers = List.from(widget.customers);
   }
 
-  int _nextId() {
-    if (_customers.isEmpty) return 1;
-    return _customers.map((e) => e.customerId).reduce((a, b) => a > b ? a : b) +
-        1;
+  List<CustomerModel> get _filteredCustomers {
+    final q = _query.trim().toLowerCase();
+    if (q.isEmpty) return _customers;
+    return _customers.where((c) {
+      return c.name.toLowerCase().contains(q) ||
+          c.phone.toLowerCase().contains(q) ||
+          c.nationalNum.toLowerCase().contains(q);
+    }).toList();
   }
 
   void _notify() => widget.onCustomersChanged(_customers);
@@ -56,7 +64,7 @@ class _CustomersScreenState extends State<CustomersScreen> {
               result.copyWith(customerId: existing.customerId),
             )
           : await EstateApi.instance.createCustomer(
-              result.copyWith(customerId: _nextId()),
+              result.copyWith(customerId: 0, numberOfRentedApartments: 0),
             );
 
       setState(() {
@@ -72,42 +80,27 @@ class _CustomersScreenState extends State<CustomersScreen> {
       _notify();
 
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            existing != null ? 'Customer updated' : 'Customer added',
-          ),
-        ),
+      AppSnackbars.success(
+        context,
+        existing != null ? 'Customer updated' : 'Customer added',
       );
     } on ApiException catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Save failed: ${e.message}')));
+      AppSnackbars.error(context, 'Save failed: ${e.message}');
     } finally {
       if (mounted) setState(() => _isSaving = false);
     }
   }
 
   Future<void> _confirmDelete(CustomerModel c) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Delete customer?'),
-        content: Text('Remove ${c.name} from the list?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
+    final ok = await showAppConfirmDialog(
+      context,
+      title: 'Delete customer?',
+      message: 'Remove ${c.name} from the backend?',
+      confirmLabel: 'Delete',
+      destructive: true,
     );
-    if (ok != true || !mounted) return;
+    if (!ok || !mounted) return;
 
     setState(() => _isSaving = true);
     try {
@@ -118,125 +111,165 @@ class _CustomersScreenState extends State<CustomersScreen> {
       _notify();
 
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Customer deleted')));
+      AppSnackbars.success(context, 'Customer deleted');
     } on ApiException catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Delete failed: ${e.message}')));
+      final message = e.statusCode == 400
+          ? 'Cannot delete customer while rental bookings still reference them.'
+          : 'Delete failed: ${e.message}';
+      AppSnackbars.error(context, message);
     } finally {
       if (mounted) setState(() => _isSaving = false);
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+  Widget _buildBody(ColorScheme scheme) {
+    final filtered = _filteredCustomers;
 
-    return Scaffold(
-      floatingActionButton: FloatingActionButton(
-        heroTag: 'fab_customers',
-        onPressed: _isSaving ? null : () => _openForm(),
-        child: const Icon(Icons.add),
-      ),
-      body: Stack(
-        children: [
-          _customers.isEmpty
-              ? Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.people_outline,
-                          size: 64,
-                          color: scheme.outline,
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          'No customers yet',
-                          style: Theme.of(context).textTheme.titleMedium,
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'Tap + to add your first customer.',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(color: scheme.onSurfaceVariant),
-                        ),
-                      ],
+    if (_customers.isEmpty) {
+      return AppEmptyState(
+        icon: Icons.people_outline,
+        title: 'No customers yet',
+        message: 'Customer records are saved to the backend.',
+        actionLabel: 'Add customer',
+        onAction: _isSaving ? null : () => _openForm(),
+      );
+    }
+
+    if (filtered.isEmpty) {
+      return AppEmptyState(
+        icon: Icons.search_off_rounded,
+        title: 'No matches',
+        message: 'Try a different name, phone, or national ID.',
+      );
+    }
+
+    return ListView.separated(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, kAppListBottomInset),
+      itemCount: filtered.length,
+      separatorBuilder: (_, _) => const SizedBox(height: 10),
+      itemBuilder: (context, index) {
+        final c = filtered[index];
+        final hasBooking = c.apartment?.isNotEmpty ?? false;
+        return Card(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            child: ListTile(
+              contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+              title: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      c.name,
+                      style: const TextStyle(fontWeight: FontWeight.w600),
                     ),
                   ),
-                )
-              : ListView.separated(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: _customers.length,
-                  separatorBuilder: (_, _) => const SizedBox(height: 10),
-                  itemBuilder: (context, index) {
-                    final c = _customers[index];
-                    return Card(
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 4,
+                  if (hasBooking)
+                    const AppStatusChip(
+                      label: 'Has booking',
+                      tone: AppChipTone.positive,
+                    ),
+                ],
+              ),
+              subtitle: Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(c.phone),
+                    if (hasBooking) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        'Apartment: ${c.apartment}',
+                        style: TextStyle(
+                          color: scheme.onSurfaceVariant,
+                          fontSize: 12,
                         ),
-                        child: ListTile(
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                          ),
-                          title: Text(
-                            c.name,
-                            style: const TextStyle(fontWeight: FontWeight.w600),
-                          ),
-                          subtitle: Padding(
-                            padding: const EdgeInsets.only(top: 6),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(c.phone),
-                                const SizedBox(height: 2),
-                                Text('Apartment: ${c.apartment ?? ''}'),
-                                Text('National #: ${c.nationalNum}'),
-                              ],
-                            ),
-                          ),
-                          isThreeLine: true,
-                          trailing: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              IconButton(
-                                icon: const Icon(Icons.edit_outlined),
-                                onPressed: _isSaving
-                                    ? null
-                                    : () => _openForm(existing: c),
-                              ),
-                              IconButton(
-                                icon: Icon(
-                                  Icons.delete_outline,
-                                  color: scheme.error,
-                                ),
-                                onPressed: _isSaving
-                                    ? null
-                                    : () => _confirmDelete(c),
-                              ),
-                            ],
-                          ),
-                        ),
+                      ),
+                    ],
+                    if (c.nationalNum.isNotEmpty)
+                      Text('National #: ${c.nationalNum}'),
+                  ],
+                ),
+              ),
+              isThreeLine: true,
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    tooltip: 'Edit customer',
+                    icon: const Icon(Icons.edit_outlined),
+                    onPressed: _isSaving ? null : () => _openForm(existing: c),
+                  ),
+                  IconButton(
+                    tooltip: 'Delete customer',
+                    icon: Icon(Icons.delete_outline, color: scheme.error),
+                    onPressed: _isSaving ? null : () => _confirmDelete(c),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final content = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const AppFlowBanner(
+          icon: Icons.cloud_outlined,
+          text:
+              'Customer records are backend-backed. Apartment and rental dates shown on cards are derived from bookings.',
+        ),
+        if (_customers.isNotEmpty)
+          AppSearchField(
+            hint: 'Search customers',
+            onChanged: (value) => setState(() => _query = value),
+          ),
+        Expanded(child: _buildBody(Theme.of(context).colorScheme)),
+      ],
+    );
+
+    final stack = Stack(
+      children: [
+        widget.onRefresh == null
+            ? content
+            : RefreshIndicator(
+                onRefresh: widget.onRefresh!,
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    return SingleChildScrollView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      child: SizedBox(
+                        height: constraints.maxHeight,
+                        child: content,
                       ),
                     );
                   },
                 ),
-          if (_isSaving)
-            const Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
-              child: LinearProgressIndicator(),
-            ),
-        ],
+              ),
+        if (_isSaving)
+          const Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: LinearProgressIndicator(),
+          ),
+      ],
+    );
+
+    return Scaffold(
+      floatingActionButton: FloatingActionButton.extended(
+        heroTag: 'fab_customers',
+        onPressed: _isSaving ? null : () => _openForm(),
+        icon: const Icon(Icons.person_add_outlined),
+        label: const Text('Add customer'),
       ),
+      body: stack,
     );
   }
 }
