@@ -9,6 +9,7 @@ import 'package:estatetrack1/models/apartment_model.dart';
 import 'package:estatetrack1/models/rental_booking_model.dart';
 import 'package:estatetrack1/ui/app_components.dart';
 import 'package:estatetrack1/utils/apartment_display.dart';
+import 'package:estatetrack1/utils/return_settlement.dart';
 
 class ApartmentReturnFormScreen extends StatefulWidget {
   const ApartmentReturnFormScreen({
@@ -43,17 +44,37 @@ class _ApartmentReturnFormScreenState extends State<ApartmentReturnFormScreen> {
   late final TextEditingController _finalCheckNotes;
   DateTime? _returnDate;
   int? _bookingIdFromContract;
+  bool _rentalDaysTouched = false;
+  bool _totalDueTouched = false;
 
   List<ContractModel> get _eligibleContracts {
     final returnedBookingIds = widget.returns
         .where((r) => r.bookingId != null)
         .map((r) => r.bookingId!)
         .toSet();
-    return widget.contracts.where((c) {
-      if (c.status != 'Active') return false;
-      if (widget.existing?.bookingId == c.bookingId) return true;
-      return !returnedBookingIds.contains(c.bookingId);
-    }).toList();
+    final seenBookingIds = <int>{};
+    final eligible = <ContractModel>[];
+    for (final contract in widget.contracts) {
+      final bookingId = contract.bookingId;
+      final isExistingReturn =
+          widget.existing?.bookingId != null &&
+          widget.existing!.bookingId == bookingId;
+      final isActiveWithoutReturn =
+          contract.status == 'Active' &&
+          !returnedBookingIds.contains(bookingId);
+      if (!isExistingReturn && !isActiveWithoutReturn) continue;
+      if (!seenBookingIds.add(bookingId)) continue;
+      eligible.add(contract);
+    }
+    return eligible;
+  }
+
+  int? _dropdownBookingId(List<ContractModel> eligible) {
+    final ids = eligible.map((c) => c.bookingId).toSet();
+    final current = _bookingIdFromContract;
+    if (current != null && ids.contains(current)) return current;
+    if (eligible.length == 1) return eligible.first.bookingId;
+    return null;
   }
 
   @override
@@ -77,8 +98,17 @@ class _ApartmentReturnFormScreenState extends State<ApartmentReturnFormScreen> {
     _finalCheckNotes = TextEditingController(text: e?.finalCheckNotes ?? '');
     _returnDate = e?.actualReturnDate ?? DateTime.now();
     _bookingIdFromContract = e?.bookingId;
+    _rentalDaysTouched = e != null;
+    _totalDueTouched = e != null;
     if (_bookingIdFromContract == null && _eligibleContracts.length == 1) {
       _bookingIdFromContract = _eligibleContracts.first.bookingId;
+    } else if (_bookingIdFromContract != null &&
+        !_eligibleContracts.any(
+          (c) => c.bookingId == _bookingIdFromContract,
+        )) {
+      _bookingIdFromContract = _eligibleContracts.length == 1
+          ? _eligibleContracts.first.bookingId
+          : null;
     }
     if (e == null && _bookingIdFromContract != null) {
       _prefillFromContract(_bookingIdFromContract!);
@@ -103,33 +133,134 @@ class _ApartmentReturnFormScreenState extends State<ApartmentReturnFormScreen> {
     return widget.bookings.where((b) => b.bookingId == bookingId).firstOrNull;
   }
 
+  int _inclusiveDays(DateTime start, DateTime end) {
+    final startDay = DateTime(start.year, start.month, start.day);
+    final endDay = DateTime(end.year, end.month, end.day);
+    return endDay.difference(startDay).inDays + 1;
+  }
+
+  int? _suggestedRentalDays() {
+    final bookingId = _bookingIdFromContract;
+    final returnDate = _returnDate;
+    if (bookingId == null || returnDate == null) return null;
+
+    final contract = _contractForBooking(bookingId);
+    if (contract == null) return null;
+
+    final days = _inclusiveDays(contract.startDate, returnDate);
+    return days < 1 ? 1 : days;
+  }
+
+  String? _rentalDaysHelperText() {
+    final bookingId = _bookingIdFromContract;
+    final returnDate = _returnDate;
+    if (bookingId == null || returnDate == null) {
+      return 'Select an agreement and return date to calculate rental days.';
+    }
+
+    final contract = _contractForBooking(bookingId);
+    if (contract == null) return null;
+
+    final suggested = _suggestedRentalDays();
+    if (suggested == null) return null;
+
+    final startLabel =
+        contract.startDate.toIso8601String().split('T').first;
+    final returnLabel = returnDate.toIso8601String().split('T').first;
+    return '$suggested days from agreement start ($startLabel → $returnLabel)';
+  }
+
+  void _applySuggestedRentalDays() {
+    final suggested = _suggestedRentalDays();
+    if (suggested == null) return;
+    _actualRentalDays.text = suggested.toString();
+  }
+
+  int _agreementDays(ContractModel contract) {
+    return inclusiveDaysBetween(contract.startDate, contract.endDate);
+  }
+
+  double _proratedRent(ContractModel contract, int actualRentalDays) {
+    return proratedAgreementAmount(
+      agreementTotal: contract.totalAmount,
+      agreementDays: _agreementDays(contract),
+      actualRentalDays: actualRentalDays,
+    );
+  }
+
+  int? _currentRentalDays() {
+    final parsed = int.tryParse(_actualRentalDays.text.trim());
+    if (parsed != null && parsed > 0) return parsed;
+    return _suggestedRentalDays();
+  }
+
+  String? _totalDueHelperText() {
+    final bookingId = _bookingIdFromContract;
+    if (bookingId == null) return null;
+
+    final contract = _contractForBooking(bookingId);
+    final actualDays = _currentRentalDays();
+    if (contract == null || actualDays == null) return null;
+
+    final agreementDays = _agreementDays(contract);
+    final prorated = _proratedRent(contract, actualDays);
+    if (actualDays >= agreementDays) {
+      return 'Full agreement amount for $agreementDays days.';
+    }
+    return 'Early checkout: \$${contract.totalAmount.toStringAsFixed(0)} for '
+        '$agreementDays days prorated to $actualDays days '
+        '(\$${prorated.toStringAsFixed(2)} rent).';
+  }
+
+  void _recalculateTotal({bool force = false}) {
+    if (_totalDueTouched && !force) return;
+
+    final bookingId = _bookingIdFromContract;
+    if (bookingId == null) return;
+
+    final contract = _contractForBooking(bookingId);
+    final actualDays = _currentRentalDays();
+    if (contract == null || actualDays == null) return;
+
+    final additional =
+        double.tryParse(_additionalCharges.text.replaceAll(',', '')) ?? 0;
+    final rentDue = _proratedRent(contract, actualDays);
+    _actualTotalDueAmount.text = (rentDue + additional).toStringAsFixed(2);
+  }
+
   void _prefillFromContract(int bookingId) {
     final contract = _contractForBooking(bookingId);
     if (contract == null) return;
 
-    final returnDate = _returnDate ?? DateTime.now();
-    final days = returnDate.difference(contract.startDate).inDays;
-    final rentalDays = days < 0 ? 0 : days;
-    final additional =
-        double.tryParse(_additionalCharges.text.replaceAll(',', '')) ?? 0;
-    final totalDue = contract.totalAmount + additional;
-
-    _actualRentalDays.text = rentalDays.toString();
-    if (_actualTotalDueAmount.text.trim().isEmpty) {
-      _actualTotalDueAmount.text = totalDue.toStringAsFixed(2);
+    if (!_rentalDaysTouched) {
+      _applySuggestedRentalDays();
     }
+    _recalculateTotal(force: true);
   }
 
-  void _recalculateTotal() {
-    final bookingId = _bookingIdFromContract;
-    if (bookingId == null) return;
-    final contract = _contractForBooking(bookingId);
-    if (contract == null) return;
+  void _onRentalDaysChanged(String _) {
+    setState(() {
+      _rentalDaysTouched = true;
+      _recalculateTotal(force: true);
+    });
+  }
 
-    final additional =
-        double.tryParse(_additionalCharges.text.replaceAll(',', '')) ?? 0;
-    _actualTotalDueAmount.text = (contract.totalAmount + additional)
-        .toStringAsFixed(2);
+  ReturnSettlement? _currentSettlement() {
+    final bookingId = _bookingIdFromContract;
+    if (bookingId == null) return null;
+
+    final booking = _bookingForId(bookingId);
+    final totalDue =
+        double.tryParse(_actualTotalDueAmount.text.replaceAll(',', ''));
+    if (booking == null || totalDue == null) return null;
+
+    final finalPayment =
+        double.tryParse(_finalPaymentCollected.text.replaceAll(',', '')) ?? 0;
+    return ReturnSettlement.compute(
+      totalDueAmount: totalDue,
+      paidOnBooking: paidAmountForBooking(booking),
+      finalPaymentCollected: finalPayment,
+    );
   }
 
   String _contractLabel(ContractModel c) {
@@ -149,7 +280,11 @@ class _ApartmentReturnFormScreenState extends State<ApartmentReturnFormScreen> {
   }
 
   void _save() {
-    final rentalDays = int.tryParse(_actualRentalDays.text) ?? 0;
+    if (!_totalDueTouched) {
+      _recalculateTotal(force: true);
+    }
+
+    final rentalDays = int.tryParse(_actualRentalDays.text.trim()) ?? 0;
     final additionalCharges =
         double.tryParse(_additionalCharges.text.replaceAll(',', '')) ?? 0;
     final finalPayment =
@@ -165,6 +300,14 @@ class _ApartmentReturnFormScreenState extends State<ApartmentReturnFormScreen> {
       AppSnackbars.error(context, 'Select the contract / booking');
       return;
     }
+    if (rentalDays <= 0) {
+      AppSnackbars.error(context, 'Actual rental days must be at least 1');
+      return;
+    }
+    if (additionalCharges < 0) {
+      AppSnackbars.error(context, 'Additional charges cannot be negative');
+      return;
+    }
     if (finalPayment < 0) {
       AppSnackbars.error(context, 'Final payment cannot be negative');
       return;
@@ -175,10 +318,16 @@ class _ApartmentReturnFormScreenState extends State<ApartmentReturnFormScreen> {
     }
 
     final booking = _bookingForId(_bookingIdFromContract!);
-    final paid = booking == null ? 0.0 : paidAmountForBooking(booking);
-    final totalPaid = paid + finalPayment;
-    final remaining = (totalDueAmount - totalPaid).clamp(0.0, double.infinity);
-    final refunded = (totalPaid - totalDueAmount).clamp(0.0, double.infinity);
+    if (booking == null) {
+      AppSnackbars.error(context, 'Linked booking not found');
+      return;
+    }
+
+    final settlement = ReturnSettlement.compute(
+      totalDueAmount: totalDueAmount,
+      paidOnBooking: paidAmountForBooking(booking),
+      finalPaymentCollected: finalPayment,
+    );
 
     final e = widget.existing;
     final model = ApartmentReturnModel(
@@ -188,8 +337,8 @@ class _ApartmentReturnFormScreenState extends State<ApartmentReturnFormScreen> {
       actualRentalDays: rentalDays,
       additionalCharges: additionalCharges,
       actualTotalDueAmount: totalDueAmount,
-      totalRemaining: remaining,
-      totalRefundedAmount: refunded,
+      totalRemaining: settlement.remaining,
+      totalRefundedAmount: settlement.refunded,
       finalCheckNotes: _finalCheckNotes.text.trim().isEmpty
           ? null
           : _finalCheckNotes.text.trim(),
@@ -208,6 +357,7 @@ class _ApartmentReturnFormScreenState extends State<ApartmentReturnFormScreen> {
     if (picked != null) {
       setState(() {
         _returnDate = picked;
+        _rentalDaysTouched = false;
         if (_bookingIdFromContract != null) {
           _prefillFromContract(_bookingIdFromContract!);
         }
@@ -232,6 +382,8 @@ class _ApartmentReturnFormScreenState extends State<ApartmentReturnFormScreen> {
       );
     }
 
+    final selectedBookingId = _dropdownBookingId(eligible);
+
     final contractItems = eligible
         .map(
           (c) => DropdownMenuItem(
@@ -241,17 +393,16 @@ class _ApartmentReturnFormScreenState extends State<ApartmentReturnFormScreen> {
         )
         .toList();
 
-    final booking = _bookingIdFromContract == null
+    final booking = selectedBookingId == null
         ? null
-        : _bookingForId(_bookingIdFromContract!);
+        : _bookingForId(selectedBookingId);
+    final settlement = _currentSettlement();
     final paid = booking == null ? 0.0 : paidAmountForBooking(booking);
-    final totalDue =
-        double.tryParse(_actualTotalDueAmount.text.replaceAll(',', '')) ?? 0;
-    final finalPayment =
-        double.tryParse(_finalPaymentCollected.text.replaceAll(',', '')) ?? 0;
-    final totalPaid = paid + finalPayment;
-    final remaining = (totalDue - totalPaid).clamp(0.0, double.infinity);
-    final refunded = (totalPaid - totalDue).clamp(0.0, double.infinity);
+    final totalDue = settlement?.totalDueAmount ?? 0;
+    final finalPayment = settlement?.finalPaymentCollected ?? 0;
+    final totalPaid = settlement?.totalPaid ?? paid;
+    final remaining = settlement?.remaining ?? 0;
+    final refunded = settlement?.refunded ?? 0;
 
     return Scaffold(
       appBar: AppBar(title: Text(isEdit ? 'Edit Return' : 'Add Return')),
@@ -275,10 +426,12 @@ class _ApartmentReturnFormScreenState extends State<ApartmentReturnFormScreen> {
               child: DropdownButtonHideUnderline(
                 child: DropdownButton<int>(
                   isExpanded: true,
-                  value: _bookingIdFromContract,
+                  value: selectedBookingId,
                   items: contractItems,
                   onChanged: (v) => setState(() {
                     _bookingIdFromContract = v;
+                    _rentalDaysTouched = false;
+                    _totalDueTouched = false;
                     if (v != null) _prefillFromContract(v);
                   }),
                 ),
@@ -299,17 +452,20 @@ class _ApartmentReturnFormScreenState extends State<ApartmentReturnFormScreen> {
           TextField(
             controller: _actualRentalDays,
             keyboardType: TextInputType.number,
-            decoration: const InputDecoration(
+            onChanged: _onRentalDaysChanged,
+            decoration: InputDecoration(
               labelText: 'Actual rental days',
-              prefixIcon: Icon(Icons.calendar_today_outlined),
-              border: OutlineInputBorder(),
+              prefixIcon: const Icon(Icons.calendar_today_outlined),
+              border: const OutlineInputBorder(),
+              helperText: _rentalDaysHelperText(),
+              helperMaxLines: 2,
             ),
           ),
           const SizedBox(height: 12),
           TextField(
             controller: _additionalCharges,
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            onChanged: (_) => setState(_recalculateTotal),
+            onChanged: (_) => setState(() => _recalculateTotal(force: true)),
             decoration: const InputDecoration(
               labelText: 'Additional charges',
               prefixIcon: Icon(Icons.attach_money),
@@ -332,11 +488,13 @@ class _ApartmentReturnFormScreenState extends State<ApartmentReturnFormScreen> {
           TextField(
             controller: _actualTotalDueAmount,
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            onChanged: (_) => setState(() {}),
-            decoration: const InputDecoration(
+            onChanged: (_) => setState(() => _totalDueTouched = true),
+            decoration: InputDecoration(
               labelText: 'Final total due',
-              prefixIcon: Icon(Icons.calculate_outlined),
-              border: OutlineInputBorder(),
+              prefixIcon: const Icon(Icons.calculate_outlined),
+              border: const OutlineInputBorder(),
+              helperText: _totalDueHelperText(),
+              helperMaxLines: 3,
             ),
           ),
           const SizedBox(height: 12),
@@ -351,9 +509,17 @@ class _ApartmentReturnFormScreenState extends State<ApartmentReturnFormScreen> {
                     'Final payment now: \$${finalPayment.toStringAsFixed(2)}',
                   ),
                   Text('Total paid: \$${totalPaid.toStringAsFixed(2)}'),
-                  Text('Remaining: \$${remaining.toStringAsFixed(2)}'),
+                  Text('Final total due: \$${totalDue.toStringAsFixed(2)}'),
                   if (refunded > 0)
-                    Text('Refund due: \$${refunded.toStringAsFixed(2)}'),
+                    Text(
+                      'Refund due: \$${refunded.toStringAsFixed(2)}',
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.primary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    )
+                  else
+                    Text('Remaining: \$${remaining.toStringAsFixed(2)}'),
                 ],
               ),
             ),
@@ -369,9 +535,10 @@ class _ApartmentReturnFormScreenState extends State<ApartmentReturnFormScreen> {
             ),
           ),
           const SizedBox(height: 24),
-          FilledButton(
-            onPressed: _save,
-            child: Text(isEdit ? 'Update Return' : 'Add Return'),
+          AppFormActions(
+            onCancel: () => Navigator.of(context).pop(),
+            onSave: _save,
+            saveLabel: isEdit ? 'Update Return' : 'Add Return',
           ),
         ],
       ),

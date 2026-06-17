@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 
+import 'package:estatetrack1/utils/return_settlement.dart';
+
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/io_client.dart';
@@ -17,6 +19,8 @@ import 'package:estatetrack1/models/customer_model.dart';
 import 'package:estatetrack1/models/maintenance_model.dart';
 import 'package:estatetrack1/models/rental_booking_model.dart';
 import 'package:estatetrack1/data/contract_builder.dart';
+import 'package:estatetrack1/data/estate_snapshot_cache.dart';
+import 'package:estatetrack1/data/local_backend_overlays.dart';
 import 'package:estatetrack1/data/rental_transaction_builder.dart';
 import 'package:estatetrack1/models/rental_transaction_model.dart';
 import 'package:estatetrack1/models/user_model.dart';
@@ -71,6 +75,142 @@ class EstateApi {
 
   final http.Client _client;
   AccountModel? currentUser;
+  List<UserModel> staffUsers = [];
+  List<RentalBookingModel> _cachedBookings = const [];
+  List<ApartmentReturnModel> _cachedReturns = const [];
+
+  Future<UserModel> getUserById(int id) async {
+    final response = await _client
+        .get(_uri('/api/Users/GetUserById?id=$id'), headers: _headers)
+        .timeout(_timeout);
+    _ensureStatus(response, const {200});
+    return _userFromJson(_decodeMap(response.body));
+  }
+
+  Future<UserModel?> getUserByName(String name) async {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) return null;
+    final response = await _client
+        .get(
+          _uri('/api/Users/ByName/${Uri.encodeComponent(trimmed)}'),
+          headers: _headers,
+        )
+        .timeout(_timeout);
+    if (response.statusCode == 404) return null;
+    _ensureStatus(response, const {200});
+    return _userFromJson(_decodeMap(response.body));
+  }
+
+  Future<bool> userExists(int id) async {
+    if (id < 1) return false;
+    final response = await _client
+        .get(_uri('/api/Users/IsUserExist?ID=$id'), headers: _headers)
+        .timeout(_timeout);
+    if (response.statusCode == 200) return true;
+    if (response.statusCode == 404) return false;
+    _ensureStatus(response, const {200, 404});
+    return false;
+  }
+
+  Future<CustomerModel> getCustomerById(int id) async {
+    final response = await _client
+        .get(_uri('/api/Customers/$id'), headers: _headers)
+        .timeout(_timeout);
+    _ensureStatus(response, const {200});
+    return _customerFromJson(_decodeMap(response.body));
+  }
+
+  Future<BuildingModel> getBuildingById(int id) async {
+    final response = await _client
+        .get(_uri('/api/Buildings/$id'), headers: _headers)
+        .timeout(_timeout);
+    _ensureStatus(response, const {200});
+    return _buildingFromJson(_decodeMap(response.body));
+  }
+
+  Future<ApartmentModel> getApartmentById(int id) async {
+    final response = await _client
+        .get(_uri('/api/Apartments/$id'), headers: _headers)
+        .timeout(_timeout);
+    _ensureStatus(response, const {200});
+    return _apartmentFromJson(_decodeMap(response.body));
+  }
+
+  Future<ApartmentTypeModel> getApartmentTypeById(int id) async {
+    final response = await _client
+        .get(_uri('/api/ApartmentTypes/$id'), headers: _headers)
+        .timeout(_timeout);
+    _ensureStatus(response, const {200});
+    return _apartmentTypeFromJson(_decodeMap(response.body));
+  }
+
+  Future<RentalBookingModel> getBookingById(int id) async {
+    final response = await _client
+        .get(_uri('/api/RentalBookings/$id'), headers: _headers)
+        .timeout(_timeout);
+    _ensureStatus(response, const {200});
+    var booking = _bookingFromJson(_decodeMap(response.body));
+    if (booking.isActive) {
+      try {
+        if (_returnsByBookingIdFromCache(id) != null ||
+            await returnExistsForBooking(id)) {
+          booking = booking.copyWith(isActive: false);
+        }
+      } on ApiException {
+        // Keep booking as returned by the API.
+      }
+    }
+    booking = _applyBookingOverlay(booking);
+    _rememberBooking(booking);
+    return booking;
+  }
+
+  ApartmentReturnModel? _returnsByBookingIdFromCache(int bookingId) {
+    for (final item in _cachedReturns) {
+      if (item.bookingId == bookingId) return item;
+    }
+    return null;
+  }
+
+  Future<MaintenanceModel> getMaintenanceById(int id) async {
+    final response = await _client
+        .get(_uri('/api/Maintenances/$id'), headers: _headers)
+        .timeout(_timeout);
+    _ensureStatus(response, const {200});
+    return _decorateMaintenance([
+      _maintenanceFromJson(_decodeMap(response.body)),
+    ]).first;
+  }
+
+  Future<bool> returnExistsForBooking(int bookingId) async {
+    final response = await _client
+        .get(
+          _uri(
+            '/api/ApartmentReturns/IsReturnExistByBookingID?bookingID=$bookingId',
+          ),
+          headers: _headers,
+        )
+        .timeout(_timeout);
+    if (response.statusCode == 200) return true;
+    if (response.statusCode == 404) return false;
+    _ensureStatus(response, const {200, 404});
+    return false;
+  }
+
+  Future<ApartmentReturnModel?> getReturnById(int returnId) async {
+    if (returnId < 1) return null;
+    final response = await _client
+        .get(_uri('/api/ApartmentReturns/$returnId'), headers: _headers)
+        .timeout(_timeout);
+    if (response.statusCode == 404) return null;
+    _ensureStatus(response, const {200});
+    return _returnFromJson(_decodeMap(response.body));
+  }
+
+  Future<void> endMaintenance(int id) async {
+    await _put('/api/Maintenances/End/$id', const {});
+    await LocalBackendOverlays.instance.markMaintenanceCompleted(id);
+  }
 
   Future<AccountModel?> login({
     required int userId,
@@ -86,13 +226,32 @@ class EstateApi {
     if (response == null) return null;
 
     final body = _decodeMap(response.body);
+    final loggedInId = _int(body['userID'], fallback: userId);
+    var name = _string(body['name'], 'User $userId');
+    var phone = '';
+    var role = loggedInId == 1 ? 'Admin' : 'Staff';
+
+    try {
+      final profile = await getUserById(loggedInId);
+      name = profile.name;
+      phone = profile.phone;
+    } on ApiException {
+      // Login succeeded; profile fetch is optional enrichment.
+    }
+
+    try {
+      staffUsers = await getUsers();
+    } on ApiException {
+      staffUsers = [];
+    }
+
     final account = AccountModel(
-      id: _int(body['userID']).toString(),
-      name: _string(body['name'], 'User $userId'),
+      id: loggedInId.toString(),
+      name: name,
       email: '',
-      phone: '',
+      phone: phone,
       password: '',
-      role: userId == 1 ? 'Admin' : 'User',
+      role: role,
     );
     currentUser = account;
     return account;
@@ -100,9 +259,14 @@ class EstateApi {
 
   void logout() {
     currentUser = null;
+    staffUsers = [];
+    _cachedBookings = const [];
+    _cachedReturns = const [];
   }
 
   Future<EstateSnapshot> loadSnapshot() async {
+    await LocalBackendOverlays.instance.ensureLoaded();
+
     final results = await Future.wait([
       _getList('/api/Customers/All', _customerFromJson),
       _getList('/api/Buildings/All', _buildingFromJson),
@@ -111,20 +275,27 @@ class EstateApi {
       _getList('/api/RentalBookings/All', _bookingFromJson),
       _getList('/api/ApartmentReturns/All', _returnFromJson),
       _getList('/api/Maintenances/All', _maintenanceFromJson),
+      _getList('/api/Users/All', _userFromJson),
     ]);
 
     final customers = results[0] as List<CustomerModel>;
     final buildings = results[1] as List<BuildingModel>;
     final apartments = results[2] as List<ApartmentModel>;
     final apartmentTypes = results[3] as List<ApartmentTypeModel>;
-    final bookings = results[4] as List<RentalBookingModel>;
+    final rawBookings = results[4] as List<RentalBookingModel>;
     final rawReturns = results[5] as List<ApartmentReturnModel>;
-    final maintenance = results[6] as List<MaintenanceModel>;
+    final rawMaintenance = results[6] as List<MaintenanceModel>;
+    staffUsers = results[7] as List<UserModel>;
+    final bookings = _decorateBookings(rawBookings, rawReturns);
     final returns = _decorateReturns(rawReturns, bookings);
+    final maintenance = _decorateMaintenance(rawMaintenance);
     final contracts = contractsFromBookings(bookings, returns);
 
-    return EstateSnapshot(
-      customers: _decorateCustomers(customers, bookings, apartments),
+    _cachedBookings = bookings;
+    _cachedReturns = returns;
+
+    final snapshot = EstateSnapshot(
+      customers: _decorateCustomers(customers, bookings, returns, apartments),
       buildings: buildings,
       apartments: apartments,
       apartmentTypes: apartmentTypes,
@@ -134,6 +305,8 @@ class EstateApi {
       rentalTransactions: buildTransactionsFromBookings(bookings, returns),
       maintenance: maintenance,
     );
+    EstateSnapshotCache.instance.save(snapshot);
+    return snapshot;
   }
 
   Future<CustomerModel> createCustomer(CustomerModel customer) async {
@@ -159,15 +332,15 @@ class EstateApi {
     final response = await _post('/api/Buildings', _buildingToJson(building));
     final saved = _buildingFromJson(_decodeMap(response!.body));
     _requirePositiveId(saved.buildingId, 'Building');
-    return saved;
+    return getBuildingById(saved.buildingId);
   }
 
   Future<BuildingModel> updateBuilding(BuildingModel building) async {
-    final response = await _put(
+    await _put(
       '/api/Buildings/${building.buildingId}',
       _buildingToJson(building),
     );
-    return _buildingFromJson(_decodeMap(response.body));
+    return getBuildingById(building.buildingId);
   }
 
   Future<void> deleteBuilding(int id) async {
@@ -181,17 +354,23 @@ class EstateApi {
     );
     final saved = _apartmentFromJson(_decodeMap(response!.body));
     _requirePositiveId(saved.apartmentId, 'Apartment');
-    return saved;
+    final fresh = await getApartmentById(saved.apartmentId);
+    return fresh.copyWith(
+      number: apartment.number,
+      location: apartment.location,
+    );
   }
 
   Future<ApartmentModel> updateApartment(ApartmentModel apartment) async {
-    final response = await _put(
+    await _put(
       '/api/Apartments/${apartment.apartmentId}',
       _apartmentToJson(apartment),
     );
-    return _apartmentFromJson(
-      _decodeMap(response.body),
-    ).copyWith(number: apartment.number, location: apartment.location);
+    final fresh = await getApartmentById(apartment.apartmentId);
+    return fresh.copyWith(
+      number: apartment.number,
+      location: apartment.location,
+    );
   }
 
   Future<void> deleteApartment(int id) async {
@@ -213,17 +392,17 @@ class EstateApi {
     );
     final saved = _apartmentTypeFromJson(_decodeMap(response!.body));
     _requirePositiveId(saved.typeId, 'Apartment type');
-    return saved;
+    return getApartmentTypeById(saved.typeId);
   }
 
   Future<ApartmentTypeModel> updateApartmentType(
     ApartmentTypeModel type,
   ) async {
-    final response = await _put(
+    await _put(
       '/api/ApartmentTypes/${type.typeId}',
       _apartmentTypeToJson(type),
     );
-    return _apartmentTypeFromJson(_decodeMap(response.body));
+    return getApartmentTypeById(type.typeId);
   }
 
   Future<void> deleteApartmentType(int id) async {
@@ -231,15 +410,21 @@ class EstateApi {
   }
 
   Future<UserModel> createUser(UserModel user) async {
+    if (user.userId > 0 && await userExists(user.userId)) {
+      throw ApiException(
+        'User ID ${user.userId} already exists',
+        statusCode: 409,
+      );
+    }
     final response = await _post('/api/Users', _userToJson(user));
     final saved = _userFromJson(_decodeMap(response!.body));
     _requirePositiveId(saved.userId, 'User');
-    return saved;
+    return getUserById(saved.userId);
   }
 
   Future<UserModel> updateUser(UserModel user) async {
-    final response = await _put('/api/Users/${user.userId}', _userToJson(user));
-    return _userFromJson(_decodeMap(response.body));
+    await _put('/api/Users/${user.userId}', _userToJson(user));
+    return getUserById(user.userId);
   }
 
   Future<void> deleteUser(int id) async {
@@ -253,15 +438,15 @@ class EstateApi {
     );
     final saved = _bookingFromJson(_decodeMap(response!.body));
     _requirePositiveId(saved.bookingId, 'Rental booking');
-    return saved;
+    return getBookingById(saved.bookingId);
   }
 
   Future<RentalBookingModel> updateBooking(RentalBookingModel booking) async {
-    final response = await _put(
+    await _put(
       '/api/RentalBookings/${booking.bookingId}',
       _bookingToJson(booking),
     );
-    return _bookingFromJson(_decodeMap(response.body));
+    return getBookingById(booking.bookingId);
   }
 
   Future<void> deleteBooking(int id) async {
@@ -273,6 +458,18 @@ class EstateApi {
     required int userId,
     double paidOnBooking = 0,
   }) async {
+    final bookingId = model.bookingId;
+    if (bookingId != null && bookingId > 0) {
+      try {
+        if (await returnExistsForBooking(bookingId)) {
+          final existing = await _findReturnByBookingId(bookingId);
+          if (existing != null) return existing;
+        }
+      } on ApiException {
+        // Fall through to create attempt if the existence check fails.
+      }
+    }
+
     final payload = _returnToJson(
       model,
       userId: userId,
@@ -282,30 +479,82 @@ class EstateApi {
     try {
       final response = await _post('/api/ApartmentReturns', payload);
       final saved = _returnFromJson(_decodeMap(response!.body));
+      if (saved.returnId <= 0 && bookingId != null && bookingId > 0) {
+        final recovered = await _findReturnByBookingId(bookingId);
+        if (recovered != null) {
+          await LocalBackendOverlays.instance.markBookingInactive(bookingId);
+          return _refreshReturnFromApi(recovered);
+        }
+      }
       _requirePositiveId(saved.returnId, 'Apartment return');
-      return saved;
+      if (bookingId != null && bookingId > 0) {
+        await LocalBackendOverlays.instance.markBookingInactive(bookingId);
+      }
+      return _refreshReturnFromApi(saved);
     } on ApiException catch (e) {
-      if (e.statusCode != 500 || model.bookingId == null) rethrow;
-      final recovered = await _findReturnByBookingId(model.bookingId!);
-      if (recovered != null) return recovered;
+      if (e.statusCode != 500 || bookingId == null) rethrow;
+      final recovered = await _findReturnByBookingId(bookingId);
+      if (recovered != null) {
+        await LocalBackendOverlays.instance.markBookingInactive(bookingId);
+        return _refreshReturnFromApi(recovered);
+      }
       rethrow;
     }
   }
 
   Future<ApartmentReturnModel?> _findReturnByBookingId(int bookingId) async {
-    final returns = await _getList(
+    for (final item in _cachedReturns) {
+      if (item.bookingId == bookingId) return item;
+    }
+
+    for (final item in await _getList(
       '/api/ApartmentReturns/All',
       _returnFromJson,
-    );
-    return returns.where((r) => r.bookingId == bookingId).firstOrNull;
+    )) {
+      if (item.bookingId == bookingId) return item;
+    }
+    return null;
+  }
+
+  RentalBookingModel? _cachedBooking(int bookingId) {
+    for (final booking in _cachedBookings) {
+      if (booking.bookingId == bookingId) return booking;
+    }
+    return null;
+  }
+
+  void _rememberBooking(RentalBookingModel booking) {
+    final next = List<RentalBookingModel>.from(_cachedBookings);
+    final index = next.indexWhere((b) => b.bookingId == booking.bookingId);
+    if (index >= 0) {
+      next[index] = booking;
+    } else {
+      next.add(booking);
+    }
+    _cachedBookings = next;
   }
 
   Future<ApartmentReturnModel> updateReturn(
     ApartmentReturnModel model, {
     required int userId,
     double paidOnBooking = 0,
-  }) {
-    // Backend UpdateReturn SQL is unreliable, so edits use delete + recreate.
+  }) async {
+    if (model.returnId > 0) {
+      try {
+        final response = await _put(
+          '/api/ApartmentReturns/${model.returnId}',
+          _returnToJson(model, userId: userId, paidOnBooking: paidOnBooking),
+        );
+        final saved = _returnFromJson(_decodeMap(response.body));
+        final bookingId = model.bookingId;
+        if (bookingId != null && bookingId > 0) {
+          await LocalBackendOverlays.instance.markBookingInactive(bookingId);
+        }
+        return _refreshReturnFromApi(saved);
+      } on ApiException {
+        // Backend UpdateReturn SQL may be unreliable; fall back below.
+      }
+    }
     return replaceReturn(model, userId: userId, paidOnBooking: paidOnBooking);
   }
 
@@ -336,7 +585,7 @@ class EstateApi {
     return updateBooking(
       booking.copyWith(
         rentalPrice: paidAmount,
-        paymentDetails: paymentDetails ?? '',
+        paymentDetails: paymentDetails ?? booking.paymentDetails ?? '',
       ),
     );
   }
@@ -356,15 +605,35 @@ class EstateApi {
   Future<MaintenanceModel> updateMaintenance(
     MaintenanceModel maintenance,
   ) async {
-    final response = await _put(
+    await _put(
       '/api/Maintenances/${maintenance.id}',
       _maintenanceToJson(maintenance),
     );
-    return _maintenanceFromJson(_decodeMap(response.body));
+    return getMaintenanceById(maintenance.id);
   }
 
   Future<void> deleteMaintenance(int id) async {
     await _delete('/api/Maintenances/$id');
+    await LocalBackendOverlays.instance.unmarkMaintenanceCompleted(id);
+  }
+
+  Future<ApartmentReturnModel> _refreshReturnFromApi(
+    ApartmentReturnModel model,
+  ) async {
+    final fresh = await getReturnById(model.returnId);
+    if (fresh == null) return model;
+
+    final bookingId = fresh.bookingId;
+    if (bookingId == null || fresh.actualRentalDays > 0) return fresh;
+
+    try {
+      final cached = _cachedBooking(bookingId);
+      final booking = cached ?? await getBookingById(bookingId);
+      final days = fresh.actualReturnDate.difference(booking.startDate).inDays;
+      return fresh.copyWith(actualRentalDays: math.max(0, days));
+    } on ApiException {
+      return fresh;
+    }
   }
 
   Future<http.Response?> _post(
@@ -403,20 +672,29 @@ class EstateApi {
     String path,
     T Function(Map<String, dynamic>) fromJson,
   ) async {
-    final response = await _client
-        .get(_uri(path), headers: _headers)
-        .timeout(_timeout);
-    if (response.statusCode == 404) return [];
-    _ensureStatus(response, const {200});
+    ApiException? lastError;
+    for (var attempt = 0; attempt <= ApiConfig.maxRetries; attempt++) {
+      try {
+        final response = await _client
+            .get(_uri(path), headers: _headers)
+            .timeout(_timeout);
+        if (response.statusCode == 404) return [];
+        _ensureStatus(response, const {200});
 
-    final decoded = jsonDecode(response.body);
-    if (decoded is! List) {
-      throw ApiException('Expected list response from $path');
+        final decoded = jsonDecode(response.body);
+        if (decoded is! List) {
+          throw ApiException('Expected list response from $path');
+        }
+        return decoded
+            .whereType<Map>()
+            .map((item) => fromJson(Map<String, dynamic>.from(item)))
+            .toList();
+      } on ApiException catch (e) {
+        lastError = e;
+        if (attempt >= ApiConfig.maxRetries) rethrow;
+      }
     }
-    return decoded
-        .whereType<Map>()
-        .map((item) => fromJson(Map<String, dynamic>.from(item)))
-        .toList();
+    throw lastError ?? ApiException('Request failed for $path');
   }
 
   Uri _uri(String path) => Uri.parse('${ApiConfig.baseUrl}$path');
@@ -637,12 +915,12 @@ Map<String, dynamic> _returnToJson(
   double paidOnBooking = 0,
 }) {
   final totalDue = model.actualTotalDueAmount;
-  final remaining = model.totalRemaining > 0
-      ? model.totalRemaining
-      : math.max(0, totalDue - paidOnBooking);
-  final refunded = model.totalRefundedAmount > 0
-      ? model.totalRefundedAmount
-      : math.max(0, paidOnBooking - totalDue);
+  final settlement = ReturnSettlement.compute(
+    totalDueAmount: totalDue,
+    paidOnBooking: paidOnBooking,
+  );
+  final useModelSettlement =
+      model.totalRemaining > 0 || model.totalRefundedAmount > 0;
 
   return {
     'returnID': model.returnId,
@@ -651,8 +929,12 @@ Map<String, dynamic> _returnToJson(
     'finalCheckNotes': model.finalCheckNotes ?? '',
     'additionalCharges': model.additionalCharges,
     'actualTotalDueAmount': totalDue,
-    'totalRemaining': remaining,
-    'totalRefundedAmount': refunded,
+    'totalRemaining': useModelSettlement
+        ? model.totalRemaining
+        : settlement.remaining,
+    'totalRefundedAmount': useModelSettlement
+        ? model.totalRefundedAmount
+        : settlement.refunded,
     'userID': userId,
   };
 }
@@ -682,27 +964,52 @@ Map<String, dynamic> _maintenanceToJson(MaintenanceModel maintenance) {
 List<CustomerModel> _decorateCustomers(
   List<CustomerModel> customers,
   List<RentalBookingModel> bookings,
+  List<ApartmentReturnModel> returns,
   List<ApartmentModel> apartments,
 ) {
   return customers.map((customer) {
-    final booking = bookings.where((b) => b.customerId == customer.customerId);
-    if (booking.isEmpty) return customer;
+    final customerBookings = bookings
+        .where((b) => b.customerId == customer.customerId)
+        .toList();
+    if (customerBookings.isEmpty) return customer;
 
-    final firstBooking = booking.first;
+    final activeBookings =
+        customerBookings
+            .where(
+              (b) =>
+                  contractStatusFor(booking: b, returns: returns) == 'Active',
+            )
+            .toList()
+          ..sort((a, b) => b.startDate.compareTo(a.startDate));
+
+    final sortedBookings = List<RentalBookingModel>.from(customerBookings)
+      ..sort((a, b) => b.startDate.compareTo(a.startDate));
+    final reference = activeBookings.isNotEmpty
+        ? activeBookings.first
+        : sortedBookings.first;
+
     final apartment = apartments
-        .where((a) => a.apartmentId == firstBooking.apartmentId)
+        .where((a) => a.apartmentId == reference.apartmentId)
         .firstOrNull;
 
     return customer.copyWith(
       numberOfRentedApartments: math.max(
         customer.numberOfRentedApartments,
-        booking.length,
+        activeBookings.length,
       ),
-      apartment: apartment?.number ?? '#${firstBooking.apartmentId}',
-      startDate: firstBooking.startDate.toIso8601String().split('T').first,
-      endDate: firstBooking.endDate.toIso8601String().split('T').first,
+      apartment: apartment?.number ?? '#${reference.apartmentId}',
+      startDate: reference.startDate.toIso8601String().split('T').first,
+      endDate: reference.endDate.toIso8601String().split('T').first,
     );
   }).toList();
+}
+
+RentalBookingModel _applyBookingOverlay(RentalBookingModel booking) {
+  if (LocalBackendOverlays.instance.isBookingInactive(booking.bookingId) &&
+      booking.isActive) {
+    return booking.copyWith(isActive: false);
+  }
+  return booking;
 }
 
 List<ApartmentReturnModel> _decorateReturns(
@@ -717,6 +1024,38 @@ List<ApartmentReturnModel> _decorateReturns(
     final days = item.actualReturnDate.difference(booking.startDate).inDays;
     return item.copyWith(actualRentalDays: math.max(0, days));
   }).toList();
+}
+
+List<RentalBookingModel> _decorateBookings(
+  List<RentalBookingModel> bookings,
+  List<ApartmentReturnModel> returns,
+) {
+  final returnedBookingIds = returns
+      .map((item) => item.bookingId)
+      .whereType<int>()
+      .toSet();
+  final overlays = LocalBackendOverlays.instance;
+
+  return bookings.map((booking) {
+    final inactive =
+        returnedBookingIds.contains(booking.bookingId) ||
+        overlays.isBookingInactive(booking.bookingId);
+    if (inactive && booking.isActive) {
+      return _applyBookingOverlay(booking.copyWith(isActive: false));
+    }
+    return _applyBookingOverlay(booking);
+  }).toList();
+}
+
+List<MaintenanceModel> _decorateMaintenance(List<MaintenanceModel> items) {
+  final overlays = LocalBackendOverlays.instance;
+  return items
+      .map(
+        (item) => overlays.isMaintenanceCompleted(item.id)
+            ? item.copyWith(status: 'Done')
+            : item,
+      )
+      .toList();
 }
 
 int _int(dynamic value, {int fallback = 0}) {
@@ -788,3 +1127,17 @@ Map<String, dynamic> encodeBookingForTest(RentalBookingModel booking) =>
 @visibleForTesting
 ApartmentReturnModel decodeReturnForTest(Map<String, dynamic> json) =>
     _returnFromJson(json);
+
+@visibleForTesting
+Map<String, dynamic> encodeReturnForTest(
+  ApartmentReturnModel model, {
+  required int userId,
+  double paidOnBooking = 0,
+}) =>
+    _returnToJson(model, userId: userId, paidOnBooking: paidOnBooking);
+
+@visibleForTesting
+UserModel decodeUserForTest(Map<String, dynamic> json) => _userFromJson(json);
+
+@visibleForTesting
+Map<String, dynamic> encodeUserForTest(UserModel user) => _userToJson(user);

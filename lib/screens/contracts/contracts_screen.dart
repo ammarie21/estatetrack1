@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 
 import 'package:estatetrack1/data/contract_builder.dart';
 import 'package:estatetrack1/data/estate_api.dart';
-import 'package:estatetrack1/data/rental_transaction_builder.dart';
+import 'package:estatetrack1/data/estate_indexes.dart';
 import 'package:estatetrack1/models/apartment_model.dart';
 import 'package:estatetrack1/models/apartment_return_model.dart';
 import 'package:estatetrack1/models/building_model.dart';
@@ -14,6 +14,7 @@ import 'package:estatetrack1/models/rental_booking_model.dart';
 import 'package:estatetrack1/screens/contracts/apartment_return_form_screen.dart';
 import 'package:estatetrack1/screens/contracts/contract_form_screen.dart';
 import 'package:estatetrack1/ui/app_components.dart';
+import 'package:estatetrack1/utils/deferred_delete.dart';
 
 class ContractsScreen extends StatefulWidget {
   const ContractsScreen({
@@ -30,6 +31,8 @@ class ContractsScreen extends StatefulWidget {
     required this.onReturnsChanged,
     required this.onApartmentsChanged,
     this.onRefresh,
+    this.initialStatusFilter,
+    this.initialSearchQuery,
   });
 
   final int staffUserId;
@@ -44,6 +47,8 @@ class ContractsScreen extends StatefulWidget {
   final void Function(List<ApartmentReturnModel>) onReturnsChanged;
   final void Function(List<ApartmentModel>) onApartmentsChanged;
   final Future<void> Function()? onRefresh;
+  final String? initialStatusFilter;
+  final String? initialSearchQuery;
 
   @override
   State<ContractsScreen> createState() => _ContractsScreenState();
@@ -52,13 +57,19 @@ class ContractsScreen extends StatefulWidget {
 class _ContractsScreenState extends State<ContractsScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
-  String _statusFilter = 'All';
-  String _query = '';
+  late EstateIndexes _indexes;
+  late String _statusFilter;
+  late String _query;
+  late final TextEditingController _searchController;
 
   @override
   void initState() {
     super.initState();
+    _statusFilter = widget.initialStatusFilter ?? 'All';
+    _query = widget.initialSearchQuery ?? '';
+    _searchController = TextEditingController(text: _query);
     _tabController = TabController(length: 2, vsync: this);
+    _indexes = _buildIndexes();
     _tabController.addListener(() {
       if (_tabController.indexIsChanging) return;
       setState(() {});
@@ -67,8 +78,29 @@ class _ContractsScreenState extends State<ContractsScreen>
 
   @override
   void dispose() {
+    _searchController.dispose();
     _tabController.dispose();
     super.dispose();
+  }
+
+  EstateIndexes _buildIndexes() => EstateIndexes.fromLists(
+    customers: widget.customers,
+    buildings: widget.buildings,
+    apartments: widget.apartments,
+    bookings: widget.bookings,
+    returns: widget.returns,
+  );
+
+  @override
+  void didUpdateWidget(covariant ContractsScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.customers != widget.customers ||
+        oldWidget.buildings != widget.buildings ||
+        oldWidget.apartments != widget.apartments ||
+        oldWidget.bookings != widget.bookings ||
+        oldWidget.returns != widget.returns) {
+      _indexes = _buildIndexes();
+    }
   }
 
   int _estimatedMonths(DateTime start, DateTime end) {
@@ -107,6 +139,12 @@ class _ContractsScreenState extends State<ContractsScreen>
   }) {
     final months = _estimatedMonths(c.startDate, c.endDate);
     final periodFee = c.totalAmount / months;
+    final initialPayment = c.initialPayment > 0
+        ? c.initialPayment
+        : (existingBooking?.rentalPrice ?? 0);
+    final paymentDetails = initialPayment > 0
+        ? 'Initial payment: \$${initialPayment.toStringAsFixed(2)}'
+        : existingBooking?.paymentDetails;
     return RentalBookingModel(
       bookingId: bookingId,
       userId: widget.staffUserId,
@@ -117,8 +155,8 @@ class _ContractsScreenState extends State<ContractsScreen>
       initialTotalDueAmount: c.totalAmount,
       bookingType: c.bookingType,
       periodFee: periodFee,
-      rentalPrice: existingBooking?.rentalPrice ?? 0,
-      paymentDetails: existingBooking?.paymentDetails,
+      rentalPrice: initialPayment,
+      paymentDetails: paymentDetails,
       isActive: existingBooking?.isActive ?? true,
       initialCheckNotes: c.notes,
     );
@@ -133,14 +171,7 @@ class _ContractsScreenState extends State<ContractsScreen>
     return base.copyWith(status: statusOverride);
   }
 
-  double _paidForBooking(int? bookingId) {
-    if (bookingId == null) return 0;
-    final booking = widget.bookings
-        .where((b) => b.bookingId == bookingId)
-        .firstOrNull;
-    if (booking == null) return 0;
-    return paidAmountForBooking(booking);
-  }
+  double _paidForBooking(int? bookingId) => _indexes.paidForBooking(bookingId);
 
   Future<void> _applyContract(
     ContractModel raw,
@@ -486,24 +517,33 @@ class _ContractsScreenState extends State<ContractsScreen>
     );
     if (ok != true || !mounted) return;
 
+    final backupContracts = List<ContractModel>.from(widget.contracts);
+    final backupBookings = List<RentalBookingModel>.from(widget.bookings);
+
     try {
-      await EstateApi.instance.deleteBooking(c.bookingId);
-      final contracts = widget.contracts
-          .where((e) => e.contractId != c.contractId)
-          .toList();
-      final bookings = widget.bookings
-          .where((e) => e.bookingId != c.bookingId)
-          .toList();
-      widget.onContractsChanged(contracts);
-      widget.onBookingsChanged(bookings);
+      await deferredDelete(
+        context: context,
+        message: 'Agreement removed',
+        onRemove: () {
+          widget.onContractsChanged(
+            widget.contracts
+                .where((e) => e.contractId != c.contractId)
+                .toList(),
+          );
+          widget.onBookingsChanged(
+            widget.bookings.where((e) => e.bookingId != c.bookingId).toList(),
+          );
+        },
+        onRestore: () {
+          widget.onContractsChanged(backupContracts);
+          widget.onBookingsChanged(backupBookings);
+        },
+        commit: () => EstateApi.instance.deleteBooking(c.bookingId),
+      );
     } on ApiException catch (e) {
       if (!mounted) return;
       AppSnackbars.error(context, 'Agreement delete failed: ${e.message}');
-      return;
     }
-
-    if (!mounted) return;
-    AppSnackbars.success(context, 'Agreement removed');
   }
 
   Future<void> _openReturnForm({ApartmentReturnModel? existing}) async {
@@ -547,37 +587,29 @@ class _ContractsScreenState extends State<ContractsScreen>
     );
     if (ok != true || !mounted) return;
 
+    final backup = List<ApartmentReturnModel>.from(widget.returns);
     try {
-      await EstateApi.instance.deleteReturn(r.returnId);
-      final returns = widget.returns
-          .where((e) => e.returnId != r.returnId)
-          .toList();
-      widget.onReturnsChanged(returns);
+      await deferredDelete(
+        context: context,
+        message: 'Return record removed',
+        onRemove: () {
+          widget.onReturnsChanged(
+            widget.returns.where((e) => e.returnId != r.returnId).toList(),
+          );
+        },
+        onRestore: () => widget.onReturnsChanged(backup),
+        commit: () => EstateApi.instance.deleteReturn(r.returnId),
+      );
     } on ApiException catch (e) {
       if (!mounted) return;
       AppSnackbars.error(context, 'Return delete failed: ${e.message}');
-      return;
     }
-
-    if (!mounted) return;
-    AppSnackbars.success(context, 'Return deleted');
   }
 
-  String _getCustomerName(int customerId) {
-    for (final c in widget.customers) {
-      if (c.customerId == customerId) return c.name;
-    }
-    return 'Unknown';
-  }
+  String _getCustomerName(int customerId) => _indexes.customerName(customerId);
 
-  String _getApartmentNumber(int apartmentId) {
-    for (final a in widget.apartments) {
-      if (a.apartmentId == apartmentId) {
-        return a.number ?? '#${a.apartmentId}';
-      }
-    }
-    return 'Unknown';
-  }
+  String _getApartmentNumber(int apartmentId) =>
+      _indexes.apartmentNumber(apartmentId);
 
   String _returnSubtitle(ApartmentReturnModel r) {
     if (r.bookingId == null) return 'Booking not linked';
@@ -688,6 +720,7 @@ class _ContractsScreenState extends State<ContractsScreen>
       children: [
         AppSearchField(
           hint: 'Search agreements',
+          controller: _searchController,
           onChanged: (value) => setState(() => _query = value),
         ),
         AppFilterChips(
@@ -901,6 +934,15 @@ class _ContractsScreenState extends State<ContractsScreen>
                         style: const TextStyle(
                           color: Colors.green,
                           fontSize: 12,
+                        ),
+                      ),
+                    if (r.finalCheckNotes?.trim().isNotEmpty == true)
+                      Text(
+                        r.finalCheckNotes!.trim(),
+                        style: TextStyle(
+                          color: scheme.onSurfaceVariant,
+                          fontSize: 12,
+                          fontStyle: FontStyle.italic,
                         ),
                       ),
                   ],

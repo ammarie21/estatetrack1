@@ -30,6 +30,29 @@ ReportPeriodRange reportPeriodRange(String label, {DateTime? now}) {
   }
 }
 
+/// Same-length window immediately before [period].
+ReportPeriodRange previousPeriodRange(ReportPeriodRange period) {
+  final startDay = DateTime(
+    period.start.year,
+    period.start.month,
+    period.start.day,
+  );
+  final endDay = DateTime(period.end.year, period.end.month, period.end.day);
+  final length = endDay.difference(startDay);
+  final prevEnd = startDay.subtract(const Duration(days: 1));
+  final prevStart = prevEnd.subtract(length);
+  return ReportPeriodRange(
+    DateTime(prevStart.year, prevStart.month, prevStart.day),
+    DateTime(prevEnd.year, prevEnd.month, prevEnd.day, 23, 59, 59),
+  );
+}
+
+String formatReportPeriodRange(ReportPeriodRange period) {
+  final start = period.start.toIso8601String().split('T').first;
+  final end = period.end.toIso8601String().split('T').first;
+  return '$start → $end';
+}
+
 DateTime? parseReportDate(String value) {
   if (value.contains('T')) return DateTime.tryParse(value);
   return DateTime.tryParse('${value.trim()}T00:00:00');

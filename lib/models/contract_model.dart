@@ -10,6 +10,7 @@ class ContractModel {
     required this.bookingId,
     this.bookingType = 0,
     this.notes,
+    this.initialPayment = 0,
   });
 
   final int contractId;
@@ -22,6 +23,7 @@ class ContractModel {
   final int bookingId; // Link to existing booking
   final int bookingType; // 0 = monthly, 1 = daily
   final String? notes;
+  final double initialPayment;
 
   ContractModel copyWith({
     int? contractId,
@@ -34,6 +36,7 @@ class ContractModel {
     int? bookingId,
     int? bookingType,
     String? notes,
+    double? initialPayment,
   }) {
     return ContractModel(
       contractId: contractId ?? this.contractId,
@@ -46,6 +49,7 @@ class ContractModel {
       bookingId: bookingId ?? this.bookingId,
       bookingType: bookingType ?? this.bookingType,
       notes: notes ?? this.notes,
+      initialPayment: initialPayment ?? this.initialPayment,
     );
   }
 }

@@ -20,9 +20,9 @@ class ForgotPasswordScreen extends StatelessWidget {
               const SizedBox(height: 20),
               Text(
                 'Password reset is not available in the app',
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
+                style: Theme.of(
+                  context,
+                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
               ),
               const SizedBox(height: 12),
               Text(

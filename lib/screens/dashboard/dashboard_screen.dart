@@ -1,3 +1,4 @@
+import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:estatetrack1/models/apartment_model.dart';
 import 'package:estatetrack1/models/apartment_return_model.dart';
@@ -6,7 +7,11 @@ import 'package:estatetrack1/models/customer_model.dart';
 import 'package:estatetrack1/models/rental_booking_model.dart';
 import 'package:estatetrack1/models/maintenance_model.dart';
 import 'package:estatetrack1/models/rental_transaction_model.dart';
+import 'package:estatetrack1/navigation/shell_navigation.dart';
+import 'package:estatetrack1/theme/app_semantic_colors.dart';
 import 'package:estatetrack1/ui/app_components.dart';
+import 'package:estatetrack1/utils/report_analytics.dart';
+import 'package:estatetrack1/utils/report_period.dart';
 
 class DashboardScreen extends StatelessWidget {
   const DashboardScreen({
@@ -19,6 +24,7 @@ class DashboardScreen extends StatelessWidget {
     required this.rentalTransactions,
     required this.maintenance,
     this.onRefresh,
+    this.onAttentionTap,
   });
 
   final List<ApartmentModel> apartments;
@@ -29,10 +35,62 @@ class DashboardScreen extends StatelessWidget {
   final List<RentalTransactionModel> rentalTransactions;
   final List<MaintenanceModel> maintenance;
   final Future<void> Function()? onRefresh;
+  final void Function(DashboardAction action)? onAttentionTap;
+
+  Widget _buildRevenueSparkline(Color color, List<RevenueMonthPoint> points) {
+    if (points.every((p) => p.revenue <= 0)) {
+      return SizedBox(
+        height: 56,
+        child: Center(
+          child: Text(
+            'No revenue trend yet',
+            style: TextStyle(
+              fontSize: 12,
+              color: color.withValues(alpha: 0.7),
+            ),
+          ),
+        ),
+      );
+    }
+
+    final maxY =
+        points.fold(0.0, (m, p) => p.revenue > m ? p.revenue : m) * 1.2;
+
+    return SizedBox(
+      height: 56,
+      child: LineChart(
+        LineChartData(
+          minY: 0,
+          maxY: maxY <= 0 ? 100 : maxY,
+          gridData: const FlGridData(show: false),
+          borderData: FlBorderData(show: false),
+          titlesData: const FlTitlesData(show: false),
+          lineTouchData: const LineTouchData(enabled: false),
+          lineBarsData: [
+            LineChartBarData(
+              spots: [
+                for (var i = 0; i < points.length; i++)
+                  FlSpot(i.toDouble(), points[i].revenue),
+              ],
+              isCurved: true,
+              color: color,
+              barWidth: 2.5,
+              dotData: const FlDotData(show: false),
+              belowBarData: BarAreaData(
+                show: true,
+                color: color.withValues(alpha: 0.14),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final semantic = AppSemanticColors.of(context);
     final t = Theme.of(context).textTheme;
     final now = DateTime.now();
 
@@ -69,14 +127,37 @@ class DashboardScreen extends StatelessWidget {
         )
         .length;
 
+    final revenueTrend = computeRevenueTrend(
+      ReportAnalyticsInput(
+        transactions: rentalTransactions,
+        apartments: apartments,
+        buildings: const [],
+        customers: customers,
+        bookings: bookings,
+        contracts: contracts,
+        maintenance: maintenance,
+        period: reportPeriodRange('This Year'),
+      ),
+      months: 6,
+    );
+
     final attention =
-        <({String title, String detail, IconData icon, AppChipTone tone})>[
+        <
+          ({
+            String title,
+            String detail,
+            IconData icon,
+            AppChipTone tone,
+            DashboardAction action,
+          })
+        >[
           if (availCount > 0)
             (
               title: '$availCount vacant units',
               detail: 'Available apartments ready to lease',
               icon: Icons.door_front_door_outlined,
               tone: AppChipTone.neutral,
+              action: DashboardAction.vacantUnits,
             ),
           if (endingSoon > 0)
             (
@@ -84,6 +165,7 @@ class DashboardScreen extends StatelessWidget {
               detail: 'Active agreements ending within 30 days',
               icon: Icons.event_busy_outlined,
               tone: AppChipTone.warning,
+              action: DashboardAction.leasesEnding,
             ),
           if (unpaidCount > 0)
             (
@@ -91,6 +173,7 @@ class DashboardScreen extends StatelessWidget {
               detail: 'Pending or partial payments on rental bookings',
               icon: Icons.payments_outlined,
               tone: AppChipTone.warning,
+              action: DashboardAction.unpaidBookings,
             ),
           if (outstanding > 0)
             (
@@ -98,6 +181,7 @@ class DashboardScreen extends StatelessWidget {
               detail: 'Remaining balances across booking payments',
               icon: Icons.account_balance_wallet_outlined,
               tone: AppChipTone.negative,
+              action: DashboardAction.outstandingBalances,
             ),
         ];
 
@@ -107,7 +191,7 @@ class DashboardScreen extends StatelessWidget {
         value: '${occupancyPct.toStringAsFixed(0)}%',
         subtitle: '$occupiedCount occupied · $availCount vacant',
         icon: Icons.pie_chart_outline_rounded,
-        accent: scheme.tertiary,
+        accent: semantic.info,
       ),
       AppMetricCard(
         label: 'Active leases',
@@ -121,28 +205,28 @@ class DashboardScreen extends StatelessWidget {
         value: '\$${rentCollected.toStringAsFixed(0)}',
         subtitle: 'From booking rentalPrice fields',
         icon: Icons.account_balance_wallet_outlined,
-        accent: Colors.green.shade700,
+        accent: semantic.success,
       ),
       AppMetricCard(
         label: 'Outstanding',
         value: '\$${outstanding.toStringAsFixed(0)}',
         subtitle: 'Unpaid booking balances',
         icon: Icons.pending_actions_outlined,
-        accent: Colors.amber.shade800,
+        accent: semantic.warning,
       ),
       AppMetricCard(
         label: 'Operating costs',
         value: '\$${maintenanceCost.toStringAsFixed(0)}',
         subtitle: 'Backend maintenance costs',
         icon: Icons.receipt_long_outlined,
-        accent: Colors.deepOrange.shade700,
+        accent: semantic.danger,
       ),
       AppMetricCard(
         label: 'Net position',
         value: '\$${netPosition.toStringAsFixed(0)}',
         subtitle: 'Collected rent minus costs',
         icon: Icons.trending_up_rounded,
-        accent: netPosition >= 0 ? Colors.green.shade700 : scheme.error,
+        accent: netPosition >= 0 ? semantic.success : semantic.danger,
       ),
       AppMetricCard(
         label: 'Customers',
@@ -189,45 +273,60 @@ class DashboardScreen extends StatelessWidget {
                   color: scheme.primaryContainer.withValues(alpha: 0.45),
                   child: Padding(
                     padding: const EdgeInsets.all(16),
-                    child: Row(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                '${occupancyPct.toStringAsFixed(0)}% occupied',
-                                style: t.titleLarge?.copyWith(
-                                  fontWeight: FontWeight.w800,
-                                ),
-                              ),
-                              Text(
-                                '$totalApartments units · $activeContracts active leases',
-                                style: t.bodySmall?.copyWith(
-                                  color: scheme.onSurfaceVariant,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.end,
+                        Row(
                           children: [
-                            Text(
-                              '\$${rentCollected.toStringAsFixed(0)}',
-                              style: t.titleMedium?.copyWith(
-                                fontWeight: FontWeight.w700,
-                                color: scheme.primary,
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    '${occupancyPct.toStringAsFixed(0)}% occupied',
+                                    style: t.titleLarge?.copyWith(
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                  Text(
+                                    '$totalApartments units · $activeContracts active leases',
+                                    style: t.bodySmall?.copyWith(
+                                      color: scheme.onSurfaceVariant,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
-                            Text(
-                              'collected',
-                              style: t.labelSmall?.copyWith(
-                                color: scheme.onSurfaceVariant,
-                              ),
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                Text(
+                                  '\$${rentCollected.toStringAsFixed(0)}',
+                                  style: t.titleMedium?.copyWith(
+                                    fontWeight: FontWeight.w700,
+                                    color: scheme.primary,
+                                  ),
+                                ),
+                                Text(
+                                  'collected',
+                                  style: t.labelSmall?.copyWith(
+                                    color: scheme.onSurfaceVariant,
+                                  ),
+                                ),
+                              ],
                             ),
                           ],
                         ),
+                        const SizedBox(height: 12),
+                        Text(
+                          '6-month revenue trend',
+                          style: t.labelMedium?.copyWith(
+                            color: scheme.onSurfaceVariant,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        _buildRevenueSparkline(scheme.primary, revenueTrend),
                       ],
                     ),
                   ),
@@ -263,6 +362,9 @@ class DashboardScreen extends StatelessWidget {
                     ),
                     subtitle: Text(item.detail),
                     trailing: AppStatusChip(label: 'Review', tone: item.tone),
+                    onTap: onAttentionTap == null
+                        ? null
+                        : () => onAttentionTap!(item.action),
                   ),
                 );
               },

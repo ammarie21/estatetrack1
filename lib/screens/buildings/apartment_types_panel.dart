@@ -76,11 +76,15 @@ class ApartmentTypesPanelState extends State<ApartmentTypesPanel> {
   Future<void> openCreateForm() => _openForm();
 
   Future<void> _openForm({ApartmentTypeModel? existing}) async {
-    final controller = TextEditingController(text: existing?.apartmentType ?? '');
+    final controller = TextEditingController(
+      text: existing?.apartmentType ?? '',
+    );
     final name = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text(existing == null ? 'New apartment type' : 'Edit apartment type'),
+        title: Text(
+          existing == null ? 'New apartment type' : 'Edit apartment type',
+        ),
         content: TextField(
           controller: controller,
           autofocus: true,

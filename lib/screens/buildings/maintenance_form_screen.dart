@@ -164,7 +164,11 @@ class _MaintenanceFormScreenState extends State<MaintenanceFormScreen> {
           const SizedBox(height: 12),
           AppDateField(label: 'Service date', date: _date, onPick: _pickDate),
           const SizedBox(height: 24),
-          FilledButton(onPressed: _save, child: const Text('Save')),
+          AppFormActions(
+            onCancel: () => Navigator.of(context).pop(),
+            onSave: _save,
+            saveLabel: isEdit ? 'Save changes' : 'Log maintenance',
+          ),
         ],
       ),
     );

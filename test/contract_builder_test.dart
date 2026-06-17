@@ -52,6 +52,15 @@ void main() {
     expect(contracts.first.totalAmount, 500);
     expect(contracts.first.status, 'Active');
     expect(contracts.first.bookingType, 0);
+    expect(contracts.first.initialPayment, 0);
+  });
+
+  test('contractsFromBookings maps initial payment from rentalPrice', () {
+    final paidBooking = activeBooking.copyWith(rentalPrice: 200);
+
+    final contracts = contractsFromBookings([paidBooking], const []);
+
+    expect(contracts.single.initialPayment, 200);
   });
 
   test('contractsFromBookings preserves daily booking type', () {

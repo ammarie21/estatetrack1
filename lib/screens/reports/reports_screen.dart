@@ -10,7 +10,9 @@ import 'package:estatetrack1/models/rental_transaction_model.dart';
 import 'package:estatetrack1/ui/app_components.dart';
 import 'package:estatetrack1/utils/apartment_display.dart';
 import 'package:estatetrack1/utils/report_analytics.dart';
+import 'package:estatetrack1/utils/report_export.dart';
 import 'package:estatetrack1/utils/report_period.dart';
+import 'package:estatetrack1/utils/report_snapshot.dart';
 
 class ReportsScreen extends StatefulWidget {
   const ReportsScreen({
@@ -23,6 +25,9 @@ class ReportsScreen extends StatefulWidget {
     required this.contracts,
     required this.maintenance,
     this.onRefresh,
+    this.onOpenOutstandingBooking,
+    this.onOpenLeaseExpiry,
+    this.onOpenCustomer,
   });
 
   final List<RentalTransactionModel> rentalTransactions;
@@ -33,6 +38,9 @@ class ReportsScreen extends StatefulWidget {
   final List<ContractModel> contracts;
   final List<MaintenanceModel> maintenance;
   final Future<void> Function()? onRefresh;
+  final void Function(int bookingId, String status)? onOpenOutstandingBooking;
+  final void Function(ContractModel contract)? onOpenLeaseExpiry;
+  final void Function(int customerId)? onOpenCustomer;
 
   @override
   State<ReportsScreen> createState() => _ReportsScreenState();
@@ -58,7 +66,9 @@ class _ReportsScreenState extends State<ReportsScreen> {
   String get _reportTitle =>
       _selectedPeriod == 'Custom Range' ? 'Custom Range' : _selectedPeriod;
 
-  ReportAnalyticsInput get _analyticsInput => ReportAnalyticsInput(
+  String _periodRangeLabel() => formatReportPeriodRange(_period);
+
+  ReportSnapshot _buildSnapshot() => ReportSnapshot.compute(
     transactions: widget.rentalTransactions,
     apartments: widget.apartments,
     buildings: widget.buildings,
@@ -69,53 +79,26 @@ class _ReportsScreenState extends State<ReportsScreen> {
     period: _period,
   );
 
-  List<RentalTransactionModel> get _filteredTransactions =>
-      transactionsInPeriod(widget.rentalTransactions, _period);
-
-  List<MaintenanceModel> get _filteredMaintenance =>
-      maintenanceInPeriod(widget.maintenance, _period);
-
-  double get _totalRevenue => _filteredTransactions.fold(
-    0.0,
-    (sum, t) => sum + t.paidInitialTotalDueAmount,
-  );
-
-  double get _totalMaintenance =>
-      _filteredMaintenance.fold(0, (sum, m) => sum + m.cost);
-
-  double get _netProfit => _totalRevenue - _totalMaintenance;
-
-  double get _outstanding => computeOutstandingBalances(
-    _analyticsInput,
-  ).fold(0.0, (sum, row) => sum + row.remaining);
-
-  int get _occupiedCount =>
-      widget.apartments.where((a) => !a.isAvailable).length;
-
-  double get _occupancyRate => widget.apartments.isEmpty
-      ? 0
-      : (_occupiedCount / widget.apartments.length * 100);
-
-  double get _averageRent => widget.apartments.isEmpty
-      ? 0
-      : widget.apartments.fold(0.0, (sum, a) => sum + a.rentPricePerMonth) /
-            widget.apartments.length;
-
-  int get _activeLeases =>
-      widget.contracts.where((c) => c.status == 'Active').length;
-
-  Map<String, int> get _paymentStatusCounts {
-    final counts = <String, int>{};
-    for (final t in _filteredTransactions) {
-      counts[t.transactionStatus] = (counts[t.transactionStatus] ?? 0) + 1;
-    }
-    return counts;
+  Future<void> _copySummary(ReportSnapshot snapshot) async {
+    final text = buildReportSummaryText(
+      snapshot: snapshot,
+      periodLabel: _reportTitle,
+    );
+    await copyTextToClipboard(context, text);
+    if (!mounted) return;
+    AppSnackbars.success(context, 'Report summary copied');
   }
 
-  String _periodRangeLabel() {
-    final start = _period.start.toIso8601String().split('T').first;
-    final end = _period.end.toIso8601String().split('T').first;
-    return '$start → $end';
+  Future<void> _exportCsv(ReportSnapshot snapshot) async {
+    final csv = buildReportCsv(
+      input: snapshot.input,
+      periodLabel: _reportTitle,
+      period: _period,
+      snapshot: snapshot,
+    );
+    await copyTextToClipboard(context, csv);
+    if (!mounted) return;
+    AppSnackbars.success(context, 'Report CSV copied to clipboard');
   }
 
   Future<void> _selectPeriod(String? value) async {
@@ -148,36 +131,17 @@ class _ReportsScreenState extends State<ReportsScreen> {
     });
   }
 
-  Future<void> _copySummary() async {
-    final input = _analyticsInput;
-    final collectionRate = computeCollectionRate(_filteredTransactions);
-    final vacancyLoss = computeVacancyLoss(widget.apartments);
-    final monthCompare = revenueMonthComparison(input);
-    final outstanding = computeOutstandingBalances(input);
-
-    final text =
-        'EstateTrack report ($_reportTitle)\n'
-        'Range: ${_periodRangeLabel()}\n'
-        'Revenue: \$${_totalRevenue.toStringAsFixed(2)}\n'
-        'Maintenance expenses: \$${_totalMaintenance.toStringAsFixed(2)}\n'
-        'Net: \$${_netProfit.toStringAsFixed(2)}\n'
-        'Outstanding: \$${_outstanding.toStringAsFixed(2)} (${outstanding.length} bookings)\n'
-        'Collection rate: ${collectionRate.toStringAsFixed(0)}%\n'
-        'Vacancy loss estimate: \$${vacancyLoss.toStringAsFixed(2)}/mo\n'
-        'Revenue this month: \$${monthCompare.current.toStringAsFixed(2)} '
-        '(${monthCompare.changePct >= 0 ? '+' : ''}${monthCompare.changePct.toStringAsFixed(0)}% vs last month)\n'
-        'Occupancy: ${_occupancyRate.toStringAsFixed(0)}% ($_occupiedCount/${widget.apartments.length})\n'
-        'Active leases: $_activeLeases';
-    await copyTextToClipboard(context, text);
-  }
-
-  Widget _buildRevenueExpenseChart(ColorScheme scheme) {
-    final revenue = _totalRevenue;
-    final expenses = _totalMaintenance;
+  Widget _buildRevenueExpenseChart(ColorScheme scheme, ReportSnapshot snap) {
+    final revenue = snap.totalRevenue;
+    final expenses = snap.totalMaintenance;
     if (revenue <= 0 && expenses <= 0) {
       return const SizedBox(
         height: 180,
-        child: Center(child: Text('No revenue or expense data in this period')),
+        child: AppEmptyState(
+          icon: Icons.bar_chart_outlined,
+          title: 'No revenue or expense data',
+          message: 'Record payments and maintenance in this period.',
+        ),
       );
     }
     final maxY = (revenue > expenses ? revenue : expenses) * 1.25;
@@ -251,7 +215,14 @@ class _ReportsScreenState extends State<ReportsScreen> {
     String emptyMessage = 'No trend data yet',
   }) {
     if (points.every((p) => p.revenue <= 0)) {
-      return SizedBox(height: 180, child: Center(child: Text(emptyMessage)));
+      return SizedBox(
+        height: 180,
+        child: AppEmptyState(
+          icon: Icons.show_chart_outlined,
+          title: emptyMessage,
+          message: 'Data will appear once payments are recorded.',
+        ),
+      );
     }
 
     final maxY =
@@ -327,7 +298,11 @@ class _ReportsScreenState extends State<ReportsScreen> {
     if (points.isEmpty || points.every((p) => p.total == 0)) {
       return const SizedBox(
         height: 180,
-        child: Center(child: Text('No occupancy data yet')),
+        child: AppEmptyState(
+          icon: Icons.pie_chart_outline_rounded,
+          title: 'No occupancy data yet',
+          message: 'Add apartments and bookings to see occupancy trends.',
+        ),
       );
     }
 
@@ -476,6 +451,211 @@ class _ReportsScreenState extends State<ReportsScreen> {
     return AppChipTone.neutral;
   }
 
+  List<Widget> _cashCollectionChildren(
+    ReportSnapshot snap,
+    ColorScheme scheme,
+  ) {
+    return [
+      AppMetricCard(
+        label: 'Collection rate',
+        value: '${snap.collectionRate.toStringAsFixed(0)}%',
+        subtitle: 'Paid vs due in selected period',
+        icon: Icons.percent_rounded,
+        accent: snap.collectionRate >= 80
+            ? Colors.green.shade700
+            : Colors.amber.shade800,
+      ),
+      const AppSectionHeader(
+        title: 'Outstanding balances',
+        subtitle: 'Bookings with unpaid balances right now',
+      ),
+      if (snap.outstanding.isEmpty)
+        const AppEmptyState(
+          icon: Icons.check_circle_outline,
+          title: 'All caught up',
+          message: 'No bookings have outstanding balances.',
+        )
+      else
+        ...snap.outstanding.map((row) {
+          return Card(
+            child: ListTile(
+              onTap: widget.onOpenOutstandingBooking == null
+                  ? null
+                  : () => widget.onOpenOutstandingBooking!(
+                      row.bookingId,
+                      row.status,
+                    ),
+              title: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      row.customerName,
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                  AppStatusChip(
+                    label: row.status,
+                    tone: chipToneForBookingStatus(row.status),
+                  ),
+                ],
+              ),
+              subtitle: Text(
+                '${row.apartmentLabel}\n'
+                'Booking #${row.bookingId} · ends ${row.endDate.toIso8601String().split('T').first}',
+              ),
+              isThreeLine: true,
+              trailing: Text(
+                '\$${row.remaining.toStringAsFixed(2)}',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: scheme.error,
+                ),
+              ),
+              leading: widget.onOpenOutstandingBooking == null
+                  ? null
+                  : Icon(
+                      Icons.chevron_right_rounded,
+                      color: scheme.primary,
+                    ),
+            ),
+          );
+        }),
+    ];
+  }
+
+  List<Widget> _leaseExpiriesChildren(
+    ReportSnapshot snap,
+    ColorScheme scheme,
+  ) {
+    return [
+      Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          AppStatusChip(
+            label: '${snap.expiringWithin7} in 7 days',
+            tone: snap.expiringWithin7 > 0
+                ? AppChipTone.negative
+                : AppChipTone.neutral,
+          ),
+          AppStatusChip(
+            label: '${snap.expiringWithin30} in 30 days',
+            tone: snap.expiringWithin30 > 0
+                ? AppChipTone.warning
+                : AppChipTone.neutral,
+          ),
+          AppStatusChip(
+            label: '${snap.leaseExpiries.length} in 90 days',
+            tone: AppChipTone.neutral,
+          ),
+        ],
+      ),
+      const SizedBox(height: 12),
+      if (snap.leaseExpiries.isEmpty)
+        const AppEmptyState(
+          icon: Icons.event_available_outlined,
+          title: 'No upcoming expiries',
+          message: 'No active leases end in the next 90 days.',
+        )
+      else
+        ...snap.leaseExpiries.map((row) {
+          return Card(
+            child: ListTile(
+              onTap: widget.onOpenLeaseExpiry == null
+                  ? null
+                  : () => widget.onOpenLeaseExpiry!(row.contract),
+              title: Text(
+                row.customerName,
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+              subtitle: Text(
+                '${row.apartmentLabel}\n'
+                'Ends ${row.contract.endDate.toIso8601String().split('T').first}',
+              ),
+              isThreeLine: true,
+              trailing: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  AppStatusChip(
+                    label: row.daysUntilEnd == 0
+                        ? 'Today'
+                        : '${row.daysUntilEnd}d left',
+                    tone: _leaseExpiryTone(row.daysUntilEnd),
+                  ),
+                  if (widget.onOpenLeaseExpiry != null) ...[
+                    const SizedBox(height: 4),
+                    Icon(
+                      Icons.handshake_outlined,
+                      size: 18,
+                      color: scheme.primary,
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          );
+        }),
+    ];
+  }
+
+  List<Widget> _trendsChildren(ReportSnapshot snap, ColorScheme scheme) {
+    return [
+      Card(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Revenue trend',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 12),
+              _buildTrendChart(
+                scheme: scheme,
+                points: snap.revenueTrend,
+                color: scheme.primary,
+                emptyMessage: 'No revenue recorded in the last 6 months',
+              ),
+            ],
+          ),
+        ),
+      ),
+      Card(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Occupancy trend',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 12),
+              _buildOccupancyTrendChart(scheme, snap.occupancyTrend),
+            ],
+          ),
+        ),
+      ),
+      Card(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Revenue vs maintenance expenses',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 12),
+              _buildRevenueExpenseChart(scheme, snap),
+            ],
+          ),
+        ),
+      ),
+    ];
+  }
+
   void _openReportDetail({
     required String title,
     required String subtitle,
@@ -585,25 +765,22 @@ class _ReportsScreenState extends State<ReportsScreen> {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final t = Theme.of(context).textTheme;
-    final input = _analyticsInput;
+    final snap = _buildSnapshot();
+    final periodCompare = snap.periodComparison;
+    final periodDeltaLabel =
+        '${periodCompare.changePct >= 0 ? '+' : ''}${periodCompare.changePct.toStringAsFixed(0)}%';
 
-    final outstanding = computeOutstandingBalances(input);
-    final profitByApartment = computeProfitByApartment(input);
-    final profitByBuilding = computeProfitByBuilding(input);
-    final maintByApartment = maintenanceByApartment(input);
-    final maintByBuilding = maintenanceByBuilding(input);
-    final topMaintenance = topMaintenanceItems(input);
-    final maintTrend = maintenanceMonthlyTrend(input);
-    final occupancyTrend = computeOccupancyTrend(input);
-    final leaseExpiries = computeLeaseExpiries(input);
-    final revenueTrend = computeRevenueTrend(input);
-    final monthCompare = revenueMonthComparison(input);
-    final collectionRate = computeCollectionRate(_filteredTransactions);
-    final customerReliability = computeCustomerReliability(input);
-    final vacancyLoss = computeVacancyLoss(widget.apartments);
+    void openCashCollection() => _openReportDetail(
+      title: 'Cash collection',
+      subtitle: _periodRangeLabel(),
+      children: _cashCollectionChildren(snap, scheme),
+    );
 
-    final expiring7 = leaseExpiries.where((r) => r.daysUntilEnd <= 7).length;
-    final expiring30 = leaseExpiries.where((r) => r.daysUntilEnd <= 30).length;
+    void openTrends() => _openReportDetail(
+      title: 'Trends',
+      subtitle: 'Rolling 6 months',
+      children: _trendsChildren(snap, scheme),
+    );
 
     final body = SingleChildScrollView(
       physics: const AlwaysScrollableScrollPhysics(),
@@ -631,6 +808,24 @@ class _ReportsScreenState extends State<ReportsScreen> {
                     style: t.bodySmall?.copyWith(
                       color: scheme.onPrimaryContainer.withValues(alpha: 0.85),
                     ),
+                  ),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      AppStatusChip(
+                        label: 'Revenue $periodDeltaLabel vs prior period',
+                        tone: periodCompare.changePct >= 0
+                            ? AppChipTone.positive
+                            : AppChipTone.negative,
+                      ),
+                      if (snap.expiringWithin7 > 0)
+                        AppStatusChip(
+                          label: '${snap.expiringWithin7} leases ≤ 7 days',
+                          tone: AppChipTone.negative,
+                        ),
+                    ],
                   ),
                   const SizedBox(height: 12),
                   Row(
@@ -662,8 +857,13 @@ class _ReportsScreenState extends State<ReportsScreen> {
                       ],
                       IconButton.filledTonal(
                         tooltip: 'Copy summary',
-                        onPressed: _copySummary,
+                        onPressed: () => _copySummary(snap),
                         icon: const Icon(Icons.copy_all_outlined),
+                      ),
+                      IconButton.filledTonal(
+                        tooltip: 'Export CSV',
+                        onPressed: () => _exportCsv(snap),
+                        icon: const Icon(Icons.table_chart_outlined),
                       ),
                     ],
                   ),
@@ -681,11 +881,11 @@ class _ReportsScreenState extends State<ReportsScreen> {
             title: 'Key metrics',
             subtitle: 'Period-scoped revenue, collection, and vacancy',
           ),
-          if (_paymentStatusCounts.isNotEmpty) ...[
+          if (snap.paymentStatusCounts.isNotEmpty) ...[
             Wrap(
               spacing: 8,
               runSpacing: 8,
-              children: _paymentStatusCounts.entries.map((entry) {
+              children: snap.paymentStatusCounts.entries.map((entry) {
                 return AppStatusChip(
                   label: '${entry.key}: ${entry.value}',
                   tone: chipToneForBookingStatus(entry.key),
@@ -704,65 +904,72 @@ class _ReportsScreenState extends State<ReportsScreen> {
             children: [
               AppMetricCard(
                 label: 'Revenue',
-                value: '\$${_totalRevenue.toStringAsFixed(0)}',
+                value: '\$${snap.totalRevenue.toStringAsFixed(0)}',
                 subtitle: 'Booking payments in period',
                 icon: Icons.attach_money,
                 accent: scheme.primary,
+                onTap: openTrends,
               ),
               AppMetricCard(
                 label: 'Costs',
-                value: '\$${_totalMaintenance.toStringAsFixed(0)}',
+                value: '\$${snap.totalMaintenance.toStringAsFixed(0)}',
                 subtitle: 'Maintenance in period',
                 icon: Icons.receipt_long_outlined,
                 accent: scheme.error,
+                onTap: openTrends,
               ),
               AppMetricCard(
                 label: 'Net',
-                value: '\$${_netProfit.toStringAsFixed(0)}',
+                value: '\$${snap.netProfit.toStringAsFixed(0)}',
                 subtitle: _selectedPeriod,
                 icon: Icons.trending_up_rounded,
-                accent: _netProfit >= 0 ? Colors.green.shade700 : scheme.error,
+                accent: snap.netProfit >= 0 ? Colors.green.shade700 : scheme.error,
+                onTap: openTrends,
               ),
               AppMetricCard(
                 label: 'Outstanding',
-                value: '\$${_outstanding.toStringAsFixed(0)}',
-                subtitle: '${outstanding.length} unpaid bookings',
+                value: '\$${snap.outstandingTotal.toStringAsFixed(0)}',
+                subtitle: '${snap.outstanding.length} unpaid bookings',
                 icon: Icons.pending_actions_outlined,
                 accent: Colors.amber.shade800,
+                onTap: openCashCollection,
               ),
               AppMetricCard(
                 label: 'Collection rate',
-                value: '${collectionRate.toStringAsFixed(0)}%',
+                value: '${snap.collectionRate.toStringAsFixed(0)}%',
                 subtitle: 'Paid vs due in period',
                 icon: Icons.percent_rounded,
-                accent: collectionRate >= 80
+                accent: snap.collectionRate >= 80
                     ? Colors.green.shade700
                     : Colors.amber.shade800,
+                onTap: openCashCollection,
               ),
               AppMetricCard(
                 label: 'Vacancy loss',
-                value: '\$${vacancyLoss.toStringAsFixed(0)}',
+                value: '\$${snap.vacancyLoss.toStringAsFixed(0)}',
                 subtitle: 'Monthly rent at risk',
                 icon: Icons.door_front_door_outlined,
                 accent: Colors.deepOrange.shade700,
               ),
               AppMetricCard(
                 label: 'This month',
-                value: '\$${monthCompare.current.toStringAsFixed(0)}',
+                value: '\$${snap.monthComparison.current.toStringAsFixed(0)}',
                 subtitle:
-                    '${monthCompare.changePct >= 0 ? '+' : ''}${monthCompare.changePct.toStringAsFixed(0)}% vs last month',
+                    '${snap.monthComparison.changePct >= 0 ? '+' : ''}${snap.monthComparison.changePct.toStringAsFixed(0)}% vs last month',
                 icon: Icons.calendar_month_outlined,
-                accent: monthCompare.changePct >= 0
+                accent: snap.monthComparison.changePct >= 0
                     ? Colors.green.shade700
                     : scheme.error,
+                onTap: openTrends,
               ),
               AppMetricCard(
                 label: 'Occupancy',
-                value: '${_occupancyRate.toStringAsFixed(0)}%',
+                value: '${snap.occupancyRate.toStringAsFixed(0)}%',
                 subtitle:
-                    '$_occupiedCount of ${widget.apartments.length} units',
+                    '${snap.occupiedCount} of ${widget.apartments.length} units',
                 icon: Icons.pie_chart_outline_rounded,
                 accent: scheme.tertiary,
+                onTap: openTrends,
               ),
             ],
           ),
@@ -772,7 +979,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
               title: const Text('Average rent'),
               subtitle: const Text('Current inventory'),
               trailing: Text(
-                '\$${_averageRent.toStringAsFixed(0)}/mo',
+                '\$${snap.averageRent.toStringAsFixed(0)}/mo',
                 style: t.titleMedium?.copyWith(fontWeight: FontWeight.w800),
               ),
             ),
@@ -785,143 +992,35 @@ class _ReportsScreenState extends State<ReportsScreen> {
             icon: Icons.account_balance_wallet_outlined,
             title: 'Cash collection',
             subtitle: 'Outstanding balances and collection rate',
-            value: '${outstanding.length} due',
+            value: '${snap.outstanding.length} due',
             accent: Colors.amber.shade800,
-            onTap: () => _openReportDetail(
-              title: 'Cash collection',
-              subtitle: _periodRangeLabel(),
-              children: [
-                AppMetricCard(
-                  label: 'Collection rate',
-                  value: '${collectionRate.toStringAsFixed(0)}%',
-                  subtitle: 'Paid vs due in selected period',
-                  icon: Icons.percent_rounded,
-                  accent: collectionRate >= 80
-                      ? Colors.green.shade700
-                      : Colors.amber.shade800,
-                ),
-                const AppSectionHeader(
-                  title: 'Outstanding balances',
-                  subtitle: 'Bookings with unpaid balances right now',
-                ),
-                if (outstanding.isEmpty)
-                  const AppEmptyState(
-                    icon: Icons.check_circle_outline,
-                    title: 'All caught up',
-                    message: 'No bookings have outstanding balances.',
-                  )
-                else
-                  ...outstanding.map((row) {
-                    return Card(
-                      child: ListTile(
-                        title: Text(
-                          row.customerName,
-                          style: const TextStyle(fontWeight: FontWeight.w600),
-                        ),
-                        subtitle: Text(
-                          '${row.apartmentLabel}\n'
-                          'Booking #${row.bookingId} · ends ${row.endDate.toIso8601String().split('T').first}',
-                        ),
-                        isThreeLine: true,
-                        trailing: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          children: [
-                            Text(
-                              '\$${row.remaining.toStringAsFixed(2)}',
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                color: scheme.error,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            AppStatusChip(
-                              label: row.status,
-                              tone: chipToneForBookingStatus(row.status),
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  }),
-              ],
-            ),
+            onTap: openCashCollection,
           ),
           _reportDrillCard(
             icon: Icons.event_busy_outlined,
             title: 'Lease expiries',
             subtitle: 'Active agreements ending soon',
-            value: '${leaseExpiries.length}',
-            accent: expiring30 > 0 ? Colors.amber.shade800 : scheme.secondary,
+            value: '${snap.leaseExpiries.length}',
+            accent: snap.expiringWithin30 > 0
+                ? Colors.amber.shade800
+                : scheme.secondary,
             onTap: () => _openReportDetail(
               title: 'Lease expiries',
               subtitle: 'Next 90 days',
-              children: [
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    AppStatusChip(
-                      label: '$expiring7 in 7 days',
-                      tone: expiring7 > 0
-                          ? AppChipTone.negative
-                          : AppChipTone.neutral,
-                    ),
-                    AppStatusChip(
-                      label: '$expiring30 in 30 days',
-                      tone: expiring30 > 0
-                          ? AppChipTone.warning
-                          : AppChipTone.neutral,
-                    ),
-                    AppStatusChip(
-                      label: '${leaseExpiries.length} in 90 days',
-                      tone: AppChipTone.neutral,
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                if (leaseExpiries.isEmpty)
-                  const AppEmptyState(
-                    icon: Icons.event_available_outlined,
-                    title: 'No upcoming expiries',
-                    message: 'No active leases end in the next 90 days.',
-                  )
-                else
-                  ...leaseExpiries.map((row) {
-                    return Card(
-                      child: ListTile(
-                        title: Text(
-                          row.customerName,
-                          style: const TextStyle(fontWeight: FontWeight.w600),
-                        ),
-                        subtitle: Text(
-                          '${row.apartmentLabel}\n'
-                          'Ends ${row.contract.endDate.toIso8601String().split('T').first}',
-                        ),
-                        isThreeLine: true,
-                        trailing: AppStatusChip(
-                          label: row.daysUntilEnd == 0
-                              ? 'Today'
-                              : '${row.daysUntilEnd}d left',
-                          tone: _leaseExpiryTone(row.daysUntilEnd),
-                        ),
-                      ),
-                    );
-                  }),
-              ],
+              children: _leaseExpiriesChildren(snap, scheme),
             ),
           ),
           _reportDrillCard(
             icon: Icons.people_outline,
             title: 'Customer reliability',
             subtitle: 'Risk ranking by remaining balance',
-            value: '${customerReliability.length}',
+            value: '${snap.customerReliability.length}',
             accent: scheme.secondary,
             onTap: () => _openReportDetail(
               title: 'Customer reliability',
               subtitle: 'Paid totals, remaining balances, and risk flags',
               children: [
-                if (customerReliability.isEmpty)
+                if (snap.customerReliability.isEmpty)
                   const AppEmptyState(
                     icon: Icons.people_outline,
                     title: 'No customer payment history',
@@ -929,9 +1028,12 @@ class _ReportsScreenState extends State<ReportsScreen> {
                         'Customer rankings appear after bookings are recorded.',
                   )
                 else
-                  ...customerReliability.take(20).map((row) {
+                  ...snap.customerReliability.take(20).map((row) {
                     return Card(
                       child: ListTile(
+                        onTap: widget.onOpenCustomer == null
+                            ? null
+                            : () => widget.onOpenCustomer!(row.customerId),
                         title: Text(
                           row.name,
                           style: const TextStyle(fontWeight: FontWeight.w600),
@@ -961,100 +1063,41 @@ class _ReportsScreenState extends State<ReportsScreen> {
             title: 'Trends',
             subtitle: 'Revenue, occupancy, and revenue vs expenses',
             value:
-                '${monthCompare.changePct >= 0 ? '+' : ''}${monthCompare.changePct.toStringAsFixed(0)}%',
-            accent: monthCompare.changePct >= 0
+                '${snap.monthComparison.changePct >= 0 ? '+' : ''}${snap.monthComparison.changePct.toStringAsFixed(0)}%',
+            accent: snap.monthComparison.changePct >= 0
                 ? Colors.green.shade700
                 : scheme.error,
-            onTap: () => _openReportDetail(
-              title: 'Trends',
-              subtitle: 'Rolling 6 months',
-              children: [
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Revenue trend',
-                          style: TextStyle(fontWeight: FontWeight.w600),
-                        ),
-                        const SizedBox(height: 12),
-                        _buildTrendChart(
-                          scheme: scheme,
-                          points: revenueTrend,
-                          color: scheme.primary,
-                          emptyMessage:
-                              'No revenue recorded in the last 6 months',
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Occupancy trend',
-                          style: TextStyle(fontWeight: FontWeight.w600),
-                        ),
-                        const SizedBox(height: 12),
-                        _buildOccupancyTrendChart(scheme, occupancyTrend),
-                      ],
-                    ),
-                  ),
-                ),
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Revenue vs maintenance expenses',
-                          style: TextStyle(fontWeight: FontWeight.w600),
-                        ),
-                        const SizedBox(height: 12),
-                        _buildRevenueExpenseChart(scheme),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
+            onTap: openTrends,
           ),
           _reportDrillCard(
             icon: Icons.apartment_rounded,
             title: 'Profit by apartment',
             subtitle: 'Revenue minus maintenance per unit',
-            value: '${profitByApartment.length}',
-            accent: _netProfit >= 0 ? Colors.green.shade700 : scheme.error,
+            value: '${snap.profitByApartment.length}',
+            accent: snap.netProfit >= 0 ? Colors.green.shade700 : scheme.error,
             onTap: () => _openReportDetail(
               title: 'Profit by apartment',
               subtitle: _periodRangeLabel(),
-              children: [_profitList(profitByApartment, scheme)],
+              children: [_profitList(snap.profitByApartment, scheme)],
             ),
           ),
           _reportDrillCard(
             icon: Icons.business_rounded,
             title: 'Profit by building',
             subtitle: 'Aggregated apartment performance',
-            value: '${profitByBuilding.length}',
-            accent: _netProfit >= 0 ? Colors.green.shade700 : scheme.error,
+            value: '${snap.profitByBuilding.length}',
+            accent: snap.netProfit >= 0 ? Colors.green.shade700 : scheme.error,
             onTap: () => _openReportDetail(
               title: 'Profit by building',
               subtitle: _periodRangeLabel(),
-              children: [_profitList(profitByBuilding, scheme)],
+              children: [_profitList(snap.profitByBuilding, scheme)],
             ),
           ),
           _reportDrillCard(
             icon: Icons.build_outlined,
             title: 'Maintenance analysis',
             subtitle: 'Trends, costly apartments, and biggest jobs',
-            value: '\$${_totalMaintenance.toStringAsFixed(0)}',
+            value: '\$${snap.totalMaintenance.toStringAsFixed(0)}',
             accent: scheme.error,
             onTap: () => _openReportDetail(
               title: 'Maintenance analysis',
@@ -1073,7 +1116,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                         const SizedBox(height: 12),
                         _buildTrendChart(
                           scheme: scheme,
-                          points: maintTrend,
+                          points: snap.maintTrend,
                           color: scheme.error,
                           emptyMessage:
                               'No maintenance costs in the last 6 months',
@@ -1083,11 +1126,11 @@ class _ReportsScreenState extends State<ReportsScreen> {
                   ),
                 ),
                 const AppSectionHeader(title: 'By apartment'),
-                _labeledAmountList(maintByApartment, scheme),
+                _labeledAmountList(snap.maintByApartment, scheme),
                 const AppSectionHeader(title: 'By building'),
-                _labeledAmountList(maintByBuilding, scheme),
+                _labeledAmountList(snap.maintByBuilding, scheme),
                 const AppSectionHeader(title: 'Most expensive maintenance'),
-                if (topMaintenance.isEmpty)
+                if (snap.topMaintenance.isEmpty)
                   const AppEmptyState(
                     icon: Icons.build_outlined,
                     title: 'No maintenance in period',
@@ -1095,7 +1138,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                         'Top maintenance items appear for the selected period.',
                   )
                 else
-                  ...topMaintenance.map((m) {
+                  ...snap.topMaintenance.map((m) {
                     return Card(
                       child: ListTile(
                         title: Text(
@@ -1122,7 +1165,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
             icon: Icons.receipt_long_outlined,
             title: 'Maintenance log',
             subtitle: 'All backend maintenance in selected period',
-            value: '${_filteredMaintenance.length}',
+            value: '${snap.filteredMaintenance.length}',
             accent: scheme.tertiary,
             onTap: () => _openReportDetail(
               title: 'Maintenance log',
@@ -1135,14 +1178,14 @@ class _ReportsScreenState extends State<ReportsScreen> {
                     message:
                         'Log maintenance from Buildings to include backend costs here.',
                   )
-                else if (_filteredMaintenance.isEmpty)
+                else if (snap.filteredMaintenance.isEmpty)
                   AppEmptyState(
                     icon: Icons.event_busy_outlined,
                     title: 'Nothing in $_selectedPeriod',
                     message: 'Try a wider period or add a maintenance record.',
                   )
                 else
-                  ..._filteredMaintenance.map((m) {
+                  ...snap.filteredMaintenance.map((m) {
                     return Card(
                       child: ListTile(
                         title: Text(

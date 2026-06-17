@@ -282,6 +282,7 @@ class AppMetricCard extends StatelessWidget {
     required this.subtitle,
     required this.icon,
     this.accent,
+    this.onTap,
   });
 
   final String label;
@@ -289,17 +290,48 @@ class AppMetricCard extends StatelessWidget {
   final String subtitle;
   final IconData icon;
   final Color? accent;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final t = Theme.of(context).textTheme;
     final color = accent ?? scheme.primary;
-    return Card(
-      child: Padding(
+
+    Widget buildBody({required bool expandVertically}) {
+      final metricTexts = [
+        Text(
+          value,
+          style: t.titleLarge?.copyWith(
+            fontWeight: FontWeight.w800,
+            letterSpacing: -0.4,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          label,
+          style: t.labelLarge?.copyWith(
+            fontWeight: FontWeight.w600,
+            color: scheme.onSurface,
+          ),
+        ),
+        Text(
+          subtitle,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: t.bodySmall?.copyWith(
+            color: scheme.onSurfaceVariant,
+            height: 1.25,
+          ),
+        ),
+      ];
+
+      return Padding(
         padding: const EdgeInsets.all(14),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize:
+              expandVertically ? MainAxisSize.max : MainAxisSize.min,
           children: [
             Container(
               padding: const EdgeInsets.all(8),
@@ -309,35 +341,27 @@ class AppMetricCard extends StatelessWidget {
               ),
               child: Icon(icon, color: color, size: 22),
             ),
-            const Spacer(),
-            Text(
-              value,
-              style: t.titleLarge?.copyWith(
-                fontWeight: FontWeight.w800,
-                letterSpacing: -0.4,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              label,
-              style: t.labelLarge?.copyWith(
-                fontWeight: FontWeight.w600,
-                color: scheme.onSurface,
-              ),
-            ),
-            Text(
-              subtitle,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: t.bodySmall?.copyWith(
-                color: scheme.onSurfaceVariant,
-                height: 1.25,
-              ),
-            ),
+            if (expandVertically) const Spacer() else const SizedBox(height: 12),
+            ...metricTexts,
           ],
         ),
+      );
+    }
+
+    final card = Card(
+      clipBehavior: Clip.antiAlias,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          // Grid tiles get a tight height; list rows only get a loose max height.
+          final expandVertically = constraints.hasTightHeight;
+          final body = buildBody(expandVertically: expandVertically);
+          if (onTap == null) return body;
+          return InkWell(onTap: onTap, child: body);
+        },
       ),
     );
+
+    return card;
   }
 }
 
@@ -558,6 +582,22 @@ class AppSnackbars {
       ),
     );
   }
+
+  static void info(BuildContext context, String message) {
+    final scheme = Theme.of(context).colorScheme;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        behavior: SnackBarBehavior.floating,
+        content: Row(
+          children: [
+            Icon(Icons.info_outline, color: scheme.onInverseSurface),
+            const SizedBox(width: 8),
+            Expanded(child: Text(message)),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 Future<bool> showAppConfirmDialog(
@@ -694,6 +734,125 @@ class AppFormActions extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Shimmer placeholder block used while the first API snapshot loads.
+class AppSkeletonBox extends StatefulWidget {
+  const AppSkeletonBox({
+    super.key,
+    this.width,
+    this.height = 16,
+    this.borderRadius = 8,
+  });
+
+  final double? width;
+  final double height;
+  final double borderRadius;
+
+  @override
+  State<AppSkeletonBox> createState() => _AppSkeletonBoxState();
+}
+
+class _AppSkeletonBoxState extends State<AppSkeletonBox>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1100),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        final t = 0.45 + (_controller.value * 0.35);
+        return Container(
+          width: widget.width,
+          height: widget.height,
+          decoration: BoxDecoration(
+            color: Color.lerp(
+              scheme.surfaceContainerHighest,
+              scheme.surfaceContainerHigh,
+              t,
+            ),
+            borderRadius: BorderRadius.circular(widget.borderRadius),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// Dashboard-shaped skeleton for the initial backend load.
+class AppSkeletonDashboard extends StatelessWidget {
+  const AppSkeletonDashboard({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
+      children: [
+        Row(
+          children: const [
+            Expanded(child: AppSkeletonBox(height: 96, borderRadius: 16)),
+            SizedBox(width: 12),
+            Expanded(child: AppSkeletonBox(height: 96, borderRadius: 16)),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: const [
+            Expanded(child: AppSkeletonBox(height: 96, borderRadius: 16)),
+            SizedBox(width: 12),
+            Expanded(child: AppSkeletonBox(height: 96, borderRadius: 16)),
+          ],
+        ),
+        const SizedBox(height: 24),
+        const AppSkeletonBox(width: 160, height: 18, borderRadius: 6),
+        const SizedBox(height: 8),
+        const AppSkeletonBox(width: 220, height: 14, borderRadius: 6),
+        const SizedBox(height: 16),
+        const AppSkeletonBox(height: 120, borderRadius: 16),
+        const SizedBox(height: 24),
+        const AppSkeletonBox(width: 140, height: 18, borderRadius: 6),
+        const SizedBox(height: 12),
+        for (var i = 0; i < 4; i++) ...[
+          const AppSkeletonBox(height: 72, borderRadius: 12),
+          if (i < 3) const SizedBox(height: 10),
+        ],
+      ],
+    );
+  }
+}
+
+/// Generic list skeleton for tab screens during first load.
+class AppSkeletonList extends StatelessWidget {
+  const AppSkeletonList({super.key, this.itemCount = 6});
+
+  final int itemCount;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView.separated(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
+      itemCount: itemCount,
+      separatorBuilder: (_, _) => const SizedBox(height: 10),
+      itemBuilder: (_, _) => const AppSkeletonBox(height: 72, borderRadius: 12),
     );
   }
 }

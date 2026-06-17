@@ -89,10 +89,20 @@ class _RentalTransactionFormScreenState
     final paid = paidAmountForBooking(booking);
     _currentPaid = paid;
     final remaining = (total - paid).clamp(0.0, double.infinity);
+    final refunded = relatedReturn != null && relatedReturn.totalRefundedAmount > 0
+        ? relatedReturn.totalRefundedAmount
+        : (paid > total ? paid - total : 0.0);
 
     _actualTotal.text = total.toStringAsFixed(2);
     _remaining.text = remaining.toStringAsFixed(2);
-    _status = transactionStatusFor(paid: paid, total: total);
+    _refunded.text = refunded.toStringAsFixed(2);
+    _status = transactionStatusFor(
+      paid: paid,
+      total: total,
+      remaining: relatedReturn?.totalRemaining ?? remaining,
+      refunded: refunded,
+      checkedOut: relatedReturn != null,
+    );
     _paidInitial.clear();
     _paymentDetails.clear();
     if (relatedReturn != null) {
@@ -109,7 +119,16 @@ class _RentalTransactionFormScreenState
     final refunded = paid > total ? paid - total : 0.0;
     _remaining.text = remaining.toStringAsFixed(2);
     _refunded.text = refunded.toStringAsFixed(2);
-    _status = transactionStatusFor(paid: paid, total: total);
+    final relatedReturn = _bookingId == null
+        ? null
+        : _returnForBooking(_bookingId!);
+    _status = transactionStatusFor(
+      paid: paid,
+      total: total,
+      remaining: relatedReturn?.totalRemaining ?? remaining,
+      refunded: refunded,
+      checkedOut: relatedReturn != null,
+    );
   }
 
   String? _combinedPaymentDetails({
@@ -369,7 +388,11 @@ class _RentalTransactionFormScreenState
             ),
           ),
           const SizedBox(height: 24),
-          FilledButton(onPressed: _save, child: const Text('Save payment')),
+          AppFormActions(
+            onCancel: () => Navigator.of(context).pop(),
+            onSave: _save,
+            saveLabel: 'Save payment',
+          ),
         ],
       ),
     );

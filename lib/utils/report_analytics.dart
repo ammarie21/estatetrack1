@@ -1,3 +1,4 @@
+import 'package:estatetrack1/data/estate_indexes.dart';
 import 'package:estatetrack1/models/apartment_model.dart';
 import 'package:estatetrack1/models/building_model.dart';
 import 'package:estatetrack1/models/contract_model.dart';
@@ -5,7 +6,6 @@ import 'package:estatetrack1/models/customer_model.dart';
 import 'package:estatetrack1/models/maintenance_model.dart';
 import 'package:estatetrack1/models/rental_booking_model.dart';
 import 'package:estatetrack1/models/rental_transaction_model.dart';
-import 'package:estatetrack1/utils/apartment_display.dart';
 import 'package:estatetrack1/utils/report_period.dart';
 
 class OutstandingBalanceRow {
@@ -110,6 +110,7 @@ class ReportAnalyticsInput {
     required this.contracts,
     required this.maintenance,
     required this.period,
+    this.indexes,
     this.now,
   });
 
@@ -121,7 +122,18 @@ class ReportAnalyticsInput {
   final List<ContractModel> contracts;
   final List<MaintenanceModel> maintenance;
   final ReportPeriodRange period;
+  final EstateIndexes? indexes;
   final DateTime? now;
+
+  EstateIndexes resolveIndexes() =>
+      indexes ??
+      EstateIndexes.fromLists(
+        customers: customers,
+        buildings: buildings,
+        apartments: apartments,
+        bookings: bookings,
+        transactions: transactions,
+      );
 }
 
 int? parseMaintenanceApartmentId(String value) => int.tryParse(value.trim());
@@ -157,27 +169,34 @@ String customerName(int customerId, List<CustomerModel> customers) {
 List<OutstandingBalanceRow> computeOutstandingBalances(
   ReportAnalyticsInput input,
 ) {
-  final bookings = bookingMap(input.bookings);
-  final rows = <OutstandingBalanceRow>[];
+  final indexes = input.resolveIndexes();
+  final latestByBooking = <int, RentalTransactionModel>{};
 
   for (final tx in input.transactions) {
     if (tx.totalRemaining <= 0) continue;
-    if (tx.transactionStatus == 'Closed' || tx.transactionStatus == 'Paid') {
+    if (tx.transactionStatus == 'Closed' ||
+        tx.transactionStatus == 'Paid' ||
+        tx.transactionStatus == 'Refunded') {
       continue;
     }
 
-    final booking = bookings[tx.bookingId];
+    final existing = latestByBooking[tx.bookingId];
+    if (existing == null ||
+        tx.updatedTransactionDate.isAfter(existing.updatedTransactionDate)) {
+      latestByBooking[tx.bookingId] = tx;
+    }
+  }
+
+  final rows = <OutstandingBalanceRow>[];
+  for (final tx in latestByBooking.values) {
+    final booking = indexes.booking(tx.bookingId);
     if (booking == null) continue;
 
     rows.add(
       OutstandingBalanceRow(
         bookingId: tx.bookingId,
-        customerName: customerName(booking.customerId, input.customers),
-        apartmentLabel: apartmentDisplayLabelById(
-          booking.apartmentId,
-          input.apartments,
-          input.buildings,
-        ),
+        customerName: indexes.customerName(booking.customerId),
+        apartmentLabel: indexes.apartmentLabel(booking.apartmentId),
         remaining: tx.totalRemaining,
         status: tx.transactionStatus,
         endDate: booking.endDate,
@@ -192,11 +211,11 @@ List<OutstandingBalanceRow> computeOutstandingBalances(
 List<ProfitRow> computeProfitByApartment(ReportAnalyticsInput input) {
   final periodTx = transactionsInPeriod(input.transactions, input.period);
   final periodMaint = maintenanceInPeriod(input.maintenance, input.period);
-  final bookings = bookingMap(input.bookings);
+  final indexes = input.resolveIndexes();
 
   final revenue = <int, double>{};
   for (final tx in periodTx) {
-    final aptId = bookings[tx.bookingId]?.apartmentId;
+    final aptId = indexes.booking(tx.bookingId)?.apartmentId;
     if (aptId == null) continue;
     revenue[aptId] = (revenue[aptId] ?? 0) + tx.paidInitialTotalDueAmount;
   }
@@ -212,15 +231,14 @@ List<ProfitRow> computeProfitByApartment(ReportAnalyticsInput input) {
   final rows = <ProfitRow>[];
 
   for (final id in ids) {
-    final apt = input.apartments.where((a) => a.apartmentId == id).firstOrNull;
     final rev = revenue[id] ?? 0;
     final maint = costs[id] ?? 0;
     rows.add(
       ProfitRow(
         id: id,
-        label: apt == null
+        label: indexes.apartment(id) == null
             ? 'Apartment #$id'
-            : apartmentDisplayLabel(apt, input.buildings),
+            : indexes.apartmentLabel(id),
         revenue: rev,
         maintenance: maint,
         net: rev - maint,
@@ -271,13 +289,14 @@ List<ProfitRow> computeProfitByBuilding(ReportAnalyticsInput input) {
 
 List<LabeledAmount> maintenanceByApartment(ReportAnalyticsInput input) {
   final periodMaint = maintenanceInPeriod(input.maintenance, input.period);
+  final indexes = input.resolveIndexes();
   final totals = <String, double>{};
 
   for (final m in periodMaint) {
     final aptId = parseMaintenanceApartmentId(m.apartmentId);
     final label = aptId == null
         ? 'Apartment ${m.apartmentId}'
-        : apartmentDisplayLabelById(aptId, input.apartments, input.buildings);
+        : indexes.apartmentLabel(aptId);
     totals[label] = (totals[label] ?? 0) + m.cost;
   }
 
@@ -396,6 +415,7 @@ List<LeaseExpiryRow> computeLeaseExpiries(
 }) {
   final now = input.now ?? DateTime.now();
   final today = DateTime(now.year, now.month, now.day);
+  final indexes = input.resolveIndexes();
   final rows = <LeaseExpiryRow>[];
 
   for (final contract in input.contracts) {
@@ -406,12 +426,8 @@ List<LeaseExpiryRow> computeLeaseExpiries(
     rows.add(
       LeaseExpiryRow(
         contract: contract,
-        customerName: customerName(contract.customerId, input.customers),
-        apartmentLabel: apartmentDisplayLabelById(
-          contract.apartmentId,
-          input.apartments,
-          input.buildings,
-        ),
+        customerName: indexes.customerName(contract.customerId),
+        apartmentLabel: indexes.apartmentLabel(contract.apartmentId),
         daysUntilEnd: days,
       ),
     );
@@ -471,6 +487,26 @@ List<RevenueMonthPoint> computeRevenueTrend(
   return (current: current, previous: previous, changePct: changePct);
 }
 
+({double current, double previous, double changePct}) revenuePeriodComparison(
+  List<RentalTransactionModel> transactions,
+  ReportPeriodRange period,
+) {
+  double sumInPeriod(ReportPeriodRange range) {
+    return transactionsInPeriod(transactions, range).fold(
+      0.0,
+      (sum, tx) => sum + tx.paidInitialTotalDueAmount,
+    );
+  }
+
+  final current = sumInPeriod(period);
+  final previous = sumInPeriod(previousPeriodRange(period));
+  final changePct = previous <= 0
+      ? (current > 0 ? 100.0 : 0.0)
+      : ((current - previous) / previous * 100);
+
+  return (current: current, previous: previous, changePct: changePct);
+}
+
 double computeCollectionRate(List<RentalTransactionModel> transactions) {
   final due = transactions.fold(
     0.0,
@@ -487,11 +523,11 @@ double computeCollectionRate(List<RentalTransactionModel> transactions) {
 List<CustomerReliabilityRow> computeCustomerReliability(
   ReportAnalyticsInput input,
 ) {
-  final bookings = bookingMap(input.bookings);
+  final indexes = input.resolveIndexes();
   final byCustomer = <int, CustomerReliabilityRow>{};
 
   for (final tx in input.transactions) {
-    final customerId = bookings[tx.bookingId]?.customerId;
+    final customerId = indexes.booking(tx.bookingId)?.customerId;
     if (customerId == null) continue;
 
     final existing = byCustomer[customerId];
@@ -499,7 +535,7 @@ List<CustomerReliabilityRow> computeCustomerReliability(
         tx.transactionStatus == 'Pending' || tx.transactionStatus == 'Partial';
     final next = CustomerReliabilityRow(
       customerId: customerId,
-      name: customerName(customerId, input.customers),
+      name: indexes.customerName(customerId),
       totalPaid: (existing?.totalPaid ?? 0) + tx.paidInitialTotalDueAmount,
       totalRemaining: (existing?.totalRemaining ?? 0) + tx.totalRemaining,
       problemBookings: (existing?.problemBookings ?? 0) + (isProblem ? 1 : 0),

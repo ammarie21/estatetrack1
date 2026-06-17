@@ -15,6 +15,6 @@ void main() {
     await tester.pumpWidget(const EstateTrackApp());
 
     expect(find.text('EstateTrack'), findsOneWidget);
-    expect(find.widgetWithText(FilledButton, 'Login'), findsOneWidget);
+    expect(find.widgetWithText(FilledButton, 'Sign in'), findsOneWidget);
   });
 }

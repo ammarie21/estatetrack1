@@ -28,6 +28,7 @@ ContractModel contractFromBooking(
     bookingId: booking.bookingId,
     bookingType: booking.bookingType,
     notes: booking.initialCheckNotes,
+    initialPayment: booking.rentalPrice,
   );
 }
 

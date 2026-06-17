@@ -3,9 +3,12 @@ import 'package:flutter/material.dart';
 import 'package:estatetrack1/data/estate_api.dart';
 import 'package:estatetrack1/models/user_model.dart';
 import 'package:estatetrack1/ui/app_components.dart';
+import 'package:estatetrack1/utils/deferred_delete.dart';
 
 class AdminAccountsScreen extends StatefulWidget {
-  const AdminAccountsScreen({super.key});
+  const AdminAccountsScreen({super.key, this.initialUsers});
+
+  final List<UserModel>? initialUsers;
 
   @override
   State<AdminAccountsScreen> createState() => _AdminAccountsScreenState();
@@ -20,7 +23,13 @@ class _AdminAccountsScreenState extends State<AdminAccountsScreen> {
   @override
   void initState() {
     super.initState();
-    _loadUsers();
+    final seeded = widget.initialUsers;
+    if (seeded != null && seeded.isNotEmpty) {
+      _users = List<UserModel>.from(seeded);
+      _loading = false;
+    } else {
+      _loadUsers();
+    }
   }
 
   @override
@@ -47,6 +56,35 @@ class _AdminAccountsScreenState extends State<AdminAccountsScreen> {
         _error = e.message;
         _loading = false;
       });
+    }
+  }
+
+  Future<void> _confirmDeleteUser(UserModel user) async {
+    final ok = await showAppConfirmDialog(
+      context,
+      title: 'Delete user?',
+      message: 'Remove ${user.name} (UserID ${user.userId}) from the backend?',
+      confirmLabel: 'Delete',
+      destructive: true,
+    );
+    if (!ok || !mounted) return;
+
+    final backup = List<UserModel>.from(_users);
+    try {
+      await deferredDelete(
+        context: context,
+        message: '${user.name} removed',
+        onRemove: () {
+          setState(() {
+            _users.removeWhere((x) => x.userId == user.userId);
+          });
+        },
+        onRestore: () => setState(() => _users = backup),
+        commit: () => EstateApi.instance.deleteUser(user.userId),
+      );
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      AppSnackbars.error(context, e.message);
     }
   }
 
@@ -313,28 +351,7 @@ class _AdminAccountsScreenState extends State<AdminAccountsScreen> {
                           } else if (value == 'reset') {
                             _resetPassword(user);
                           } else if (value == 'delete') {
-                            final ok = await showAppConfirmDialog(
-                              context,
-                              title: 'Delete user?',
-                              message:
-                                  'Remove ${user.name} (UserID ${user.userId}) from the backend?',
-                              confirmLabel: 'Delete',
-                              destructive: true,
-                            );
-                            if (!ok || !mounted || !context.mounted) return;
-                            try {
-                              await EstateApi.instance.deleteUser(user.userId);
-                              if (!mounted || !context.mounted) return;
-                              setState(() {
-                                _users.removeWhere(
-                                  (x) => x.userId == user.userId,
-                                );
-                              });
-                              AppSnackbars.success(context, 'User deleted');
-                            } on ApiException catch (e) {
-                              if (!mounted || !context.mounted) return;
-                              AppSnackbars.error(context, e.message);
-                            }
+                            await _confirmDeleteUser(user);
                           }
                         },
                         itemBuilder: (_) => [

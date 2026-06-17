@@ -5,11 +5,15 @@ import 'package:estatetrack1/models/apartment_model.dart';
 import 'package:estatetrack1/models/apartment_type_model.dart';
 import 'package:estatetrack1/models/building_model.dart';
 import 'package:estatetrack1/models/maintenance_model.dart';
+import 'package:estatetrack1/models/contract_model.dart';
+import 'package:estatetrack1/models/customer_model.dart';
+import 'package:estatetrack1/screens/buildings/apartment_detail_screen.dart';
 import 'package:estatetrack1/screens/buildings/apartment_form_screen.dart';
 import 'package:estatetrack1/screens/buildings/apartment_types_panel.dart';
 import 'package:estatetrack1/screens/buildings/building_form_screen.dart';
 import 'package:estatetrack1/screens/maintenance/maintenance_panel.dart';
 import 'package:estatetrack1/ui/app_components.dart';
+import 'package:estatetrack1/utils/deferred_delete.dart';
 
 /// Buildings, apartments, and maintenance share one inventory hub.
 class BuildingsScreen extends StatefulWidget {
@@ -24,17 +28,23 @@ class BuildingsScreen extends StatefulWidget {
     required this.onMaintenanceChanged,
     this.onRefresh,
     this.onApartmentTypesChanged,
+    this.contracts = const [],
+    this.customers = const [],
+    this.initialAvailabilityFilter,
   });
 
   final List<BuildingModel> buildings;
   final List<ApartmentModel> apartments;
   final List<ApartmentTypeModel> apartmentTypes;
   final List<MaintenanceModel> maintenance;
+  final List<ContractModel> contracts;
+  final List<CustomerModel> customers;
   final void Function(List<BuildingModel>) onBuildingsChanged;
   final void Function(List<ApartmentModel>) onApartmentsChanged;
   final void Function(List<MaintenanceModel>) onMaintenanceChanged;
   final Future<void> Function()? onRefresh;
   final void Function(List<ApartmentTypeModel>)? onApartmentTypesChanged;
+  final String? initialAvailabilityFilter;
 
   @override
   State<BuildingsScreen> createState() => _BuildingsScreenState();
@@ -47,11 +57,12 @@ class _BuildingsScreenState extends State<BuildingsScreen>
       GlobalKey<MaintenancePanelState>();
   final GlobalKey<ApartmentTypesPanelState> _typesKey =
       GlobalKey<ApartmentTypesPanelState>();
-  String _availabilityFilter = 'All';
+  late String _availabilityFilter;
 
   @override
   void initState() {
     super.initState();
+    _availabilityFilter = widget.initialAvailabilityFilter ?? 'All';
     _tabController = TabController(length: 3, vsync: this);
     _tabController.addListener(() {
       if (_tabController.indexIsChanging) return;
@@ -165,17 +176,27 @@ class _BuildingsScreenState extends State<BuildingsScreen>
     );
     if (ok != true || !mounted) return;
 
-    try {
-      await EstateApi.instance.deleteBuilding(b.buildingId);
-      widget.onBuildingsChanged(
-        widget.buildings.where((e) => e.buildingId != b.buildingId).toList(),
-      );
-      widget.onApartmentsChanged(
-        widget.apartments.where((e) => e.buildingId != b.buildingId).toList(),
-      );
+    final backupBuildings = List<BuildingModel>.from(widget.buildings);
+    final backupApartments = List<ApartmentModel>.from(widget.apartments);
 
-      if (!mounted) return;
-      AppSnackbars.success(context, 'Building deleted');
+    try {
+      await deferredDelete(
+        context: context,
+        message: '${b.name} removed',
+        onRemove: () {
+          widget.onBuildingsChanged(
+            widget.buildings.where((e) => e.buildingId != b.buildingId).toList(),
+          );
+          widget.onApartmentsChanged(
+            widget.apartments.where((e) => e.buildingId != b.buildingId).toList(),
+          );
+        },
+        onRestore: () {
+          widget.onBuildingsChanged(backupBuildings);
+          widget.onApartmentsChanged(backupApartments);
+        },
+        commit: () => EstateApi.instance.deleteBuilding(b.buildingId),
+      );
     } on ApiException catch (e) {
       if (!mounted) return;
       AppSnackbars.error(context, 'Building delete failed: ${e.message}');
@@ -192,14 +213,21 @@ class _BuildingsScreenState extends State<BuildingsScreen>
     );
     if (ok != true || !mounted) return;
 
+    final backup = List<ApartmentModel>.from(widget.apartments);
     try {
-      await EstateApi.instance.deleteApartment(a.apartmentId);
-      widget.onApartmentsChanged(
-        widget.apartments.where((e) => e.apartmentId != a.apartmentId).toList(),
+      await deferredDelete(
+        context: context,
+        message: 'Apartment ${a.number} removed',
+        onRemove: () {
+          widget.onApartmentsChanged(
+            widget.apartments
+                .where((e) => e.apartmentId != a.apartmentId)
+                .toList(),
+          );
+        },
+        onRestore: () => widget.onApartmentsChanged(backup),
+        commit: () => EstateApi.instance.deleteApartment(a.apartmentId),
       );
-
-      if (!mounted) return;
-      AppSnackbars.success(context, 'Apartment deleted');
     } on ApiException catch (e) {
       if (!mounted) return;
       AppSnackbars.error(context, 'Apartment delete failed: ${e.message}');
@@ -211,6 +239,21 @@ class _BuildingsScreenState extends State<BuildingsScreen>
         .where((t) => t.typeId == typeId)
         .firstOrNull;
     return type?.apartmentType ?? 'Type #$typeId';
+  }
+
+  void _openApartmentDetail(ApartmentModel apartment, BuildingModel building) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => ApartmentDetailScreen(
+          apartment: apartment,
+          building: building,
+          maintenance: widget.maintenance,
+          apartmentTypes: widget.apartmentTypes,
+          contracts: widget.contracts,
+          customers: widget.customers,
+        ),
+      ),
+    );
   }
 
   Widget _inventoryTab(ColorScheme scheme) {
@@ -309,77 +352,81 @@ class _BuildingsScreenState extends State<BuildingsScreen>
                     separatorBuilder: (context, i) => const Divider(height: 1),
                     itemBuilder: (context, i) {
                       final a = buildingApartments[i];
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 8),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(
-                                    children: [
-                                      Expanded(
-                                        child: Text(
-                                          a.number ?? 'Unknown',
-                                          style: const TextStyle(
-                                            fontWeight: FontWeight.w600,
+                      return InkWell(
+                        onTap: () => _openApartmentDetail(a, b),
+                        borderRadius: BorderRadius.circular(8),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: Text(
+                                            a.number ?? 'Unknown',
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.w600,
+                                            ),
                                           ),
                                         ),
-                                      ),
-                                      AppStatusChip(
-                                        label: a.isAvailable
-                                            ? 'Vacant'
-                                            : 'Occupied',
-                                        tone: a.isAvailable
-                                            ? AppChipTone.neutral
-                                            : AppChipTone.positive,
-                                      ),
-                                    ],
-                                  ),
-                                  Text(
-                                    '${_typeLabel(a.typeId)} • ${a.bedrooms} bed • ${a.bathrooms} bath • ${a.sizeM2} m²',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: scheme.onSurfaceVariant,
+                                        AppStatusChip(
+                                          label: a.isAvailable
+                                              ? 'Vacant'
+                                              : 'Occupied',
+                                          tone: a.isAvailable
+                                              ? AppChipTone.neutral
+                                              : AppChipTone.positive,
+                                        ),
+                                      ],
                                     ),
-                                  ),
-                                  Text(
-                                    r'$'
-                                    '${a.rentPricePerMonth.toStringAsFixed(0)}/month',
-                                    style: TextStyle(
-                                      color: scheme.primary,
-                                      fontWeight: FontWeight.w600,
-                                      fontSize: 12,
+                                    Text(
+                                      '${_typeLabel(a.typeId)} • ${a.bedrooms} bed • ${a.bathrooms} bath • ${a.sizeM2} m²',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: scheme.onSurfaceVariant,
+                                      ),
                                     ),
+                                    Text(
+                                      r'$'
+                                      '${a.rentPricePerMonth.toStringAsFixed(0)}/month',
+                                      style: TextStyle(
+                                        color: scheme.primary,
+                                        fontWeight: FontWeight.w600,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              PopupMenuButton<String>(
+                                itemBuilder: (context) => const [
+                                  PopupMenuItem(
+                                    value: 'edit',
+                                    child: Text('Edit'),
+                                  ),
+                                  PopupMenuItem(
+                                    value: 'delete',
+                                    child: Text('Delete'),
                                   ),
                                 ],
+                                onSelected: (value) {
+                                  if (value == 'edit') {
+                                    _openApartmentForm(
+                                      existing: a,
+                                      buildingId: b.buildingId,
+                                    );
+                                  } else if (value == 'delete') {
+                                    _confirmDeleteApartment(a);
+                                  }
+                                },
                               ),
-                            ),
-                            PopupMenuButton<String>(
-                              itemBuilder: (context) => const [
-                                PopupMenuItem(
-                                  value: 'edit',
-                                  child: Text('Edit'),
-                                ),
-                                PopupMenuItem(
-                                  value: 'delete',
-                                  child: Text('Delete'),
-                                ),
-                              ],
-                              onSelected: (value) {
-                                if (value == 'edit') {
-                                  _openApartmentForm(
-                                    existing: a,
-                                    buildingId: b.buildingId,
-                                  );
-                                } else if (value == 'delete') {
-                                  _confirmDeleteApartment(a);
-                                }
-                              },
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
                       );
                     },

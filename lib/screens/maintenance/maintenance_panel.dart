@@ -6,6 +6,7 @@ import 'package:estatetrack1/models/building_model.dart';
 import 'package:estatetrack1/models/maintenance_model.dart';
 import 'package:estatetrack1/screens/buildings/maintenance_form_screen.dart';
 import 'package:estatetrack1/ui/app_components.dart';
+import 'package:estatetrack1/utils/deferred_delete.dart';
 import 'package:estatetrack1/utils/apartment_display.dart';
 
 class MaintenancePanel extends StatefulWidget {
@@ -48,6 +49,42 @@ class MaintenancePanelState extends State<MaintenancePanel> {
         .firstOrNull;
     if (apartment == null) return 'Unit #$id';
     return apartmentDisplayLabel(apartment, widget.buildings);
+  }
+
+  AppChipTone _maintenanceTone(String status) {
+    switch (status.toLowerCase()) {
+      case 'done':
+      case 'completed':
+        return AppChipTone.positive;
+      case 'pending':
+      case 'in progress':
+        return AppChipTone.warning;
+      default:
+        return AppChipTone.neutral;
+    }
+  }
+
+  bool _canComplete(String status) {
+    final normalized = status.toLowerCase();
+    return normalized != 'done' && normalized != 'completed';
+  }
+
+  Future<void> _completeMaintenance(MaintenanceModel item) async {
+    try {
+      await EstateApi.instance.endMaintenance(item.id);
+      final next = List<MaintenanceModel>.from(widget.maintenance);
+      final index = next.indexWhere((m) => m.id == item.id);
+      if (index >= 0) {
+        next[index] = item.copyWith(status: 'Done');
+      }
+      widget.onMaintenanceChanged(next);
+
+      if (!mounted) return;
+      AppSnackbars.success(context, 'Maintenance marked complete');
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      AppSnackbars.error(context, 'Complete failed: ${e.message}');
+    }
   }
 
   Future<void> openCreateForm() => _openForm();
@@ -102,14 +139,19 @@ class MaintenancePanelState extends State<MaintenancePanel> {
     );
     if (ok != true || !mounted) return;
 
+    final backup = List<MaintenanceModel>.from(widget.maintenance);
     try {
-      await EstateApi.instance.deleteMaintenance(item.id);
-      widget.onMaintenanceChanged(
-        widget.maintenance.where((m) => m.id != item.id).toList(),
+      await deferredDelete(
+        context: context,
+        message: 'Maintenance record removed',
+        onRemove: () {
+          widget.onMaintenanceChanged(
+            widget.maintenance.where((m) => m.id != item.id).toList(),
+          );
+        },
+        onRestore: () => widget.onMaintenanceChanged(backup),
+        commit: () => EstateApi.instance.deleteMaintenance(item.id),
       );
-
-      if (!mounted) return;
-      AppSnackbars.success(context, 'Maintenance deleted');
     } on ApiException catch (e) {
       if (!mounted) return;
       AppSnackbars.error(context, 'Maintenance delete failed: ${e.message}');
@@ -199,20 +241,36 @@ class MaintenancePanelState extends State<MaintenancePanel> {
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Text(
-                              '\$${item.cost.toStringAsFixed(2)}',
-                              style: TextStyle(
-                                color: scheme.tertiary,
-                                fontWeight: FontWeight.bold,
-                              ),
+                            Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                Text(
+                                  '\$${item.cost.toStringAsFixed(2)}',
+                                  style: TextStyle(
+                                    color: scheme.tertiary,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                AppStatusChip(
+                                  label: item.status,
+                                  tone: _maintenanceTone(item.status),
+                                ),
+                              ],
                             ),
                             PopupMenuButton<String>(
-                              itemBuilder: (context) => const [
-                                PopupMenuItem(
+                              itemBuilder: (context) => [
+                                const PopupMenuItem(
                                   value: 'edit',
                                   child: Text('Edit'),
                                 ),
-                                PopupMenuItem(
+                                if (_canComplete(item.status))
+                                  const PopupMenuItem(
+                                    value: 'complete',
+                                    child: Text('Mark complete'),
+                                  ),
+                                const PopupMenuItem(
                                   value: 'delete',
                                   child: Text('Delete'),
                                 ),
@@ -220,6 +278,8 @@ class MaintenancePanelState extends State<MaintenancePanel> {
                               onSelected: (value) {
                                 if (value == 'edit') {
                                   _openForm(existing: item);
+                                } else if (value == 'complete') {
+                                  _completeMaintenance(item);
                                 } else if (value == 'delete') {
                                   _confirmDelete(item);
                                 }

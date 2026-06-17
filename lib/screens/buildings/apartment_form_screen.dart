@@ -290,9 +290,10 @@ class _ApartmentFormScreenState extends State<ApartmentFormScreen> {
             onChanged: (value) => setState(() => _elevator = value ?? false),
           ),
           const SizedBox(height: 24),
-          FilledButton(
-            onPressed: _save,
-            child: Text(isEdit ? 'Update Apartment' : 'Add Apartment'),
+          AppFormActions(
+            onCancel: () => Navigator.of(context).pop(),
+            onSave: _save,
+            saveLabel: isEdit ? 'Update Apartment' : 'Add Apartment',
           ),
         ],
       ),

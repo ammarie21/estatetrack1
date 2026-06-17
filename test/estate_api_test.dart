@@ -2,6 +2,7 @@ import 'package:estatetrack1/data/estate_api.dart';
 import 'package:estatetrack1/models/apartment_type_model.dart';
 import 'package:estatetrack1/models/customer_model.dart';
 import 'package:estatetrack1/models/rental_booking_model.dart';
+import 'package:estatetrack1/models/user_model.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -83,5 +84,20 @@ void main() {
     expect(decoded.actualTotalDueAmount, 525);
     expect(decoded.additionalCharges, 25);
     expect(decoded.finalCheckNotes, 'minor cleaning');
+  });
+
+  test('user json round trip', () {
+    const original = UserModel(
+      userId: 1,
+      name: 'Main Admin',
+      phone: '01000000001',
+      password: 'Admin@123',
+    );
+    final json = encodeUserForTest(original);
+    final decoded = decodeUserForTest(json);
+
+    expect(decoded.userId, 1);
+    expect(decoded.name, 'Main Admin');
+    expect(decoded.phone, '01000000001');
   });
 }

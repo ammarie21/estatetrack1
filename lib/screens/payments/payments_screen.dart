@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:estatetrack1/data/estate_api.dart';
 import 'package:estatetrack1/data/rental_transaction_builder.dart';
+import 'package:estatetrack1/data/staff_user_registry.dart';
 import 'package:estatetrack1/models/apartment_model.dart';
 import 'package:estatetrack1/models/apartment_return_model.dart';
 import 'package:estatetrack1/models/building_model.dart';
@@ -10,6 +11,8 @@ import 'package:estatetrack1/models/rental_transaction_model.dart';
 import 'package:estatetrack1/screens/payments/rental_transaction_form_screen.dart';
 import 'package:estatetrack1/ui/app_components.dart';
 import 'package:estatetrack1/utils/apartment_display.dart';
+import 'package:estatetrack1/utils/deferred_delete.dart';
+import 'package:estatetrack1/utils/payment_details_parser.dart';
 
 class PaymentsScreen extends StatefulWidget {
   const PaymentsScreen({
@@ -24,6 +27,8 @@ class PaymentsScreen extends StatefulWidget {
     required this.onRentalTransactionsChanged,
     required this.onBookingsChanged,
     this.onRefresh,
+    this.initialTxnFilter,
+    this.initialSearchQuery,
   });
 
   final List<RentalTransactionModel> rentalTransactions;
@@ -36,6 +41,8 @@ class PaymentsScreen extends StatefulWidget {
   final void Function(List<RentalTransactionModel>) onRentalTransactionsChanged;
   final void Function(List<RentalBookingModel>) onBookingsChanged;
   final Future<void> Function()? onRefresh;
+  final String? initialTxnFilter;
+  final String? initialSearchQuery;
 
   @override
   State<PaymentsScreen> createState() => _PaymentsScreenState();
@@ -43,14 +50,24 @@ class PaymentsScreen extends StatefulWidget {
 
 class _PaymentsScreenState extends State<PaymentsScreen> {
   late List<RentalTransactionModel> _transactions;
-  String _txnFilter = 'All';
-  String _query = '';
+  late String _txnFilter;
+  late String _query;
+  late final TextEditingController _searchController;
   bool _isSaving = false;
 
   @override
   void initState() {
     super.initState();
+    _txnFilter = widget.initialTxnFilter ?? 'All';
+    _query = widget.initialSearchQuery ?? '';
+    _searchController = TextEditingController(text: _query);
     _transactions = List.from(widget.rentalTransactions);
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
   @override
@@ -126,40 +143,49 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
     );
     if (ok != true || !mounted) return;
 
+    final booking = widget.bookings
+        .where((b) => b.bookingId == t.bookingId)
+        .firstOrNull;
+    if (booking == null) return;
+
+    final backupBookings = List<RentalBookingModel>.from(widget.bookings);
+    final backupTransactions = List<RentalTransactionModel>.from(_transactions);
+
     setState(() => _isSaving = true);
     try {
-      final booking = widget.bookings
-          .where((b) => b.bookingId == t.bookingId)
-          .firstOrNull;
-      if (booking == null) return;
-
-      final saved = await EstateApi.instance.saveBookingPayment(
-        booking: booking,
-        paidAmount: 0,
-        paymentDetails: '',
+      await deferredDelete(
+        context: context,
+        message: 'Payment cleared for booking #${t.bookingId}',
+        onRemove: () {
+          final cleared = booking.copyWith(rentalPrice: 0, paymentDetails: '');
+          final nextBookings = List<RentalBookingModel>.from(widget.bookings);
+          final i = nextBookings.indexWhere((b) => b.bookingId == cleared.bookingId);
+          if (i >= 0) nextBookings[i] = cleared;
+          final nextTransactions = buildTransactionsFromBookings(
+            nextBookings,
+            widget.returns,
+          );
+          setState(() => _transactions = nextTransactions);
+          widget.onBookingsChanged(nextBookings);
+          widget.onRentalTransactionsChanged(nextTransactions);
+        },
+        onRestore: () {
+          setState(() => _transactions = backupTransactions);
+          widget.onBookingsChanged(backupBookings);
+          widget.onRentalTransactionsChanged(backupTransactions);
+        },
+        commit: () => EstateApi.instance.saveBookingPayment(
+          booking: booking,
+          paidAmount: 0,
+          paymentDetails: '',
+        ),
       );
-      final nextBookings = List<RentalBookingModel>.from(widget.bookings);
-      final bookingIndex = nextBookings.indexWhere(
-        (b) => b.bookingId == saved.bookingId,
-      );
-      if (bookingIndex >= 0) nextBookings[bookingIndex] = saved;
-      final nextTransactions = buildTransactionsFromBookings(
-        nextBookings,
-        widget.returns,
-      );
-      setState(() => _transactions = nextTransactions);
-      widget.onBookingsChanged(nextBookings);
-      widget.onRentalTransactionsChanged(nextTransactions);
     } on ApiException catch (e) {
       if (!mounted) return;
       AppSnackbars.error(context, 'Transaction delete failed: ${e.message}');
-      return;
     } finally {
       if (mounted) setState(() => _isSaving = false);
     }
-
-    if (!mounted) return;
-    AppSnackbars.success(context, 'Transaction deleted');
   }
 
   String _bookingSubtitle(RentalTransactionModel t) {
@@ -266,10 +292,11 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
       children: [
         AppSearchField(
           hint: 'Search transactions',
+          controller: _searchController,
           onChanged: (value) => setState(() => _query = value),
         ),
         AppFilterChips(
-          options: const ['All', 'Pending', 'Partial', 'Paid', 'Closed'],
+          options: const ['All', 'Pending', 'Partial', 'Paid', 'Refunded', 'Closed'],
           selected: _txnFilter,
           onSelected: (value) => setState(() => _txnFilter = value),
         ),
@@ -291,6 +318,12 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
                   separatorBuilder: (_, _) => const SizedBox(height: 10),
                   itemBuilder: (context, index) {
                     final t = filtered[index];
+                    final booking = widget.bookings
+                        .where((b) => b.bookingId == t.bookingId)
+                        .firstOrNull;
+                    final paymentNotes = summarizePaymentDetails(
+                      t.paymentDetails,
+                    );
                     return Card(
                       child: ListTile(
                         contentPadding: const EdgeInsets.symmetric(
@@ -325,12 +358,30 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
                               const SizedBox(height: 4),
                               Text(
                                 'Paid \$${t.paidInitialTotalDueAmount.toStringAsFixed(2)} · '
-                                'Remaining \$${t.totalRemaining.toStringAsFixed(2)}',
+                                'Due \$${t.actualTotalDueAmount.toStringAsFixed(2)} · '
+                                '${t.totalRefundedAmount > 0 ? 'Refund \$${t.totalRefundedAmount.toStringAsFixed(2)}' : 'Remaining \$${t.totalRemaining.toStringAsFixed(2)}'}',
                                 style: TextStyle(
                                   color: scheme.onSurfaceVariant,
                                   fontSize: 13,
                                 ),
                               ),
+                              if (booking != null && booking.periodFee > 0)
+                                Text(
+                                  'Period fee \$${booking.periodFee.toStringAsFixed(2)} · '
+                                  'Staff: ${staffUserName(booking.userId)}',
+                                  style: TextStyle(
+                                    color: scheme.onSurfaceVariant,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              if (paymentNotes.isNotEmpty)
+                                Text(
+                                  paymentNotes,
+                                  style: TextStyle(
+                                    color: scheme.outline,
+                                    fontSize: 12,
+                                  ),
+                                ),
                               Text(
                                 '${t.updatedTransactionDate.toString().split(' ')[0]}'
                                 '${t.returnId != null ? ' · Linked return #${t.returnId}' : ' · No return linked'}',

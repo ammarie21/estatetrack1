@@ -145,18 +145,11 @@ class _CreateAccountScreenState extends State<CreateAccountScreen> {
                   },
                 ),
                 const SizedBox(height: 24),
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton(
-                    onPressed: _isSaving ? null : _createAccount,
-                    child: _isSaving
-                        ? const SizedBox(
-                            height: 20,
-                            width: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Text('Create Account'),
-                  ),
+                AppFormActions(
+                  onCancel: () => Navigator.of(context).pop(),
+                  onSave: _createAccount,
+                  isSaving: _isSaving,
+                  saveLabel: 'Create Account',
                 ),
               ],
             ),

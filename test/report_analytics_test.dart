@@ -8,6 +8,7 @@ import 'package:estatetrack1/models/rental_booking_model.dart';
 import 'package:estatetrack1/models/rental_transaction_model.dart';
 import 'package:estatetrack1/utils/report_analytics.dart';
 import 'package:estatetrack1/utils/report_period.dart';
+import 'report_fixtures.dart';
 
 void main() {
   final buildings = [
@@ -160,5 +161,65 @@ void main() {
     final rows = computeLeaseExpiries(input);
     expect(rows, hasLength(1));
     expect(rows.first.daysUntilEnd, 5);
+  });
+
+  test('profit by building aggregates apartment revenue', () {
+    final rows = computeProfitByBuilding(input);
+    expect(rows, hasLength(1));
+    expect(rows.first.label, 'Tower A');
+    expect(rows.first.net, 1850);
+  });
+
+  test('customer reliability ranks by remaining balance', () {
+    final rows = computeCustomerReliability(input);
+    expect(rows, hasLength(1));
+    expect(rows.first.name, 'Alice');
+    expect(rows.first.totalRemaining, greaterThan(0));
+    expect(rows.first.problemBookings, 1);
+  });
+
+  test('revenue trend returns six monthly points', () {
+    final points = computeRevenueTrend(input);
+    expect(points, hasLength(6));
+    expect(points.last.revenue, 2000);
+  });
+
+  test('occupancy trend returns six monthly points', () {
+    final points = computeOccupancyTrend(input);
+    expect(points, hasLength(6));
+    expect(points.every((p) => p.total == 2), isTrue);
+  });
+
+  test('maintenance breakdown and top items respect period', () {
+    final byApartment = maintenanceByApartment(input);
+    final byBuilding = maintenanceByBuilding(input);
+    final top = topMaintenanceItems(input);
+
+    expect(byApartment, isNotEmpty);
+    expect(byBuilding, isNotEmpty);
+    expect(top, hasLength(1));
+    expect(top.first.description, 'Paint');
+  });
+
+  test('revenue period comparison uses prior window', () {
+    final compare = revenuePeriodComparison(
+      kReportTransactions,
+      reportPeriodRange('This Month', now: kReportNow),
+    );
+    expect(compare.current, 2000);
+    expect(compare.previous, 500);
+    expect(compare.changePct, 300);
+  });
+
+  test('transactions and maintenance in period filter correctly', () {
+    final period = reportPeriodRange('This Month', now: kReportNow);
+    expect(transactionsInPeriod(kReportTransactions, period), hasLength(1));
+    expect(maintenanceInPeriod(kReportMaintenance, period), hasLength(1));
+  });
+
+  test('outstanding dedupes multiple transactions for same booking', () {
+    final rows = computeOutstandingBalances(reportAnalyticsInput());
+    expect(rows, hasLength(1));
+    expect(rows.first.remaining, 3000);
   });
 }

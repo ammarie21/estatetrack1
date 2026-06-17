@@ -31,6 +31,7 @@ class ContractFormScreen extends StatefulWidget {
 class _ContractFormScreenState extends State<ContractFormScreen> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _totalAmount;
+  late final TextEditingController _initialPayment;
   late final TextEditingController _notes;
   late int? _selectedCustomerId;
   late int? _selectedApartmentId;
@@ -43,6 +44,7 @@ class _ContractFormScreenState extends State<ContractFormScreen> {
   DateTime? _endDate;
   String? _startDateError;
   String? _endDateError;
+  bool _totalAmountTouched = false;
 
   @override
   void initState() {
@@ -51,29 +53,127 @@ class _ContractFormScreenState extends State<ContractFormScreen> {
     _totalAmount = TextEditingController(
       text: e != null ? e.totalAmount.toStringAsFixed(0) : '',
     );
+    final existingBooking = e == null
+        ? null
+        : widget.bookings
+            .where((booking) => booking.bookingId == e.bookingId)
+            .firstOrNull;
+    final existingInitialPayment = e?.initialPayment ?? 0;
+    final paidOnBooking = existingBooking?.rentalPrice ?? 0;
+    final initialPayment = existingInitialPayment > 0
+        ? existingInitialPayment
+        : paidOnBooking;
+    _initialPayment = TextEditingController(
+      text: initialPayment > 0 ? initialPayment.toStringAsFixed(0) : '',
+    );
     _notes = TextEditingController(text: e?.notes ?? '');
-    _selectedCustomerId =
-        e?.customerId ??
-        (widget.customers.isNotEmpty
-            ? widget.customers.first.customerId
-            : null);
-    _selectedApartmentId =
-        e?.apartmentId ??
-        (widget.apartments.isNotEmpty
-            ? widget.apartments.first.apartmentId
-            : null);
-    _selectedBookingId = e?.bookingId ?? 0;
-    _bookingType = e?.bookingType ?? 0;
+    _selectedCustomerId = _validOption(
+      e?.customerId,
+      widget.customers.map((customer) => customer.customerId),
+    );
+    _selectedApartmentId = _validOption(
+      e?.apartmentId,
+      widget.apartments.map((apartment) => apartment.apartmentId),
+    );
+    _selectedBookingId = _validBookingId(e?.bookingId);
+    _bookingType = _normalizeBookingType(e?.bookingType ?? 0);
     _status = e?.status ?? 'Active';
     _startDate = e?.startDate;
     _endDate = e?.endDate;
+    _totalAmountTouched = e != null;
   }
+
+  bool get _hasValidDateRange =>
+      _startDate != null &&
+      _endDate != null &&
+      !_endDate!.isBefore(_startDate!);
 
   @override
   void dispose() {
     _totalAmount.dispose();
+    _initialPayment.dispose();
     _notes.dispose();
     super.dispose();
+  }
+
+  int _normalizeBookingType(int type) => type == 1 ? 1 : 0;
+
+  int? _validOption(int? value, Iterable<int> options) {
+    final ids = options.toSet();
+    if (value != null && ids.contains(value)) return value;
+    return ids.isEmpty ? null : ids.first;
+  }
+
+  int _validBookingId(int? value) {
+    if (widget.existing == null) return 0;
+    if (value != null &&
+        widget.bookings.any((booking) => booking.bookingId == value)) {
+      return value;
+    }
+    return widget.bookings.isNotEmpty ? widget.bookings.first.bookingId : 0;
+  }
+
+  ApartmentModel? get _selectedApartment => widget.apartments
+      .where((apartment) => apartment.apartmentId == _selectedApartmentId)
+      .firstOrNull;
+
+  static const double _daysPerMonth = 30;
+
+  int _inclusiveDays(DateTime start, DateTime end) {
+    final startDay = DateTime(start.year, start.month, start.day);
+    final endDay = DateTime(end.year, end.month, end.day);
+    return endDay.difference(startDay).inDays + 1;
+  }
+
+  double _monthlyProratedTotal(double monthlyRate, int days) {
+    return monthlyRate * (days / _daysPerMonth);
+  }
+
+  double? _suggestedTotalAmount() {
+    final apartment = _selectedApartment;
+    if (apartment == null || !_hasValidDateRange) return null;
+
+    final days = _inclusiveDays(_startDate!, _endDate!);
+    if (_bookingType == 1) {
+      return apartment.rentPricePerDay * days;
+    }
+
+    return _monthlyProratedTotal(apartment.rentPricePerMonth, days);
+  }
+
+  String? _amountHelperText() {
+    final apartment = _selectedApartment;
+    if (apartment == null) return null;
+
+    final monthlyRate = apartment.rentPricePerMonth.toStringAsFixed(0);
+    final dailyRate = apartment.rentPricePerDay.toStringAsFixed(0);
+
+    if (!_hasValidDateRange) {
+      return 'Apartment rates: \$$monthlyRate/mo · \$$dailyRate/day. '
+          'Choose start and end dates to calculate a suggested total.';
+    }
+
+    final days = _inclusiveDays(_startDate!, _endDate!);
+    final suggested = _suggestedTotalAmount();
+    if (suggested == null) return null;
+
+    if (_bookingType == 1) {
+      return '$days days × \$$dailyRate/day = '
+          '\$${suggested.toStringAsFixed(0)} suggested (editable)';
+    }
+
+    final monthlyDayRate =
+        apartment.rentPricePerMonth / _daysPerMonth;
+    return '$days days × \$${monthlyDayRate.toStringAsFixed(2)}/day '
+        '(\$$monthlyRate/mo prorated) = '
+        '\$${suggested.toStringAsFixed(0)} suggested (editable)';
+  }
+
+  void _applySuggestedAmount() {
+    if (_totalAmountTouched) return;
+    final suggested = _suggestedTotalAmount();
+    if (suggested == null || suggested <= 0) return;
+    _totalAmount.text = suggested.toStringAsFixed(0);
   }
 
   void _save() {
@@ -87,6 +187,8 @@ class _ContractFormScreenState extends State<ContractFormScreen> {
     }
     final totalAmount =
         double.tryParse(_totalAmount.text.replaceAll(',', '')) ?? 0;
+    final initialPayment =
+        double.tryParse(_initialPayment.text.replaceAll(',', '')) ?? 0;
     final e = widget.existing;
     if (_selectedCustomerId == null ||
         _selectedApartmentId == null ||
@@ -102,6 +204,13 @@ class _ContractFormScreenState extends State<ContractFormScreen> {
       AppSnackbars.error(context, 'Please fix the highlighted fields');
       return;
     }
+    if (initialPayment > totalAmount) {
+      AppSnackbars.error(
+        context,
+        'Initial payment cannot be greater than the total amount',
+      );
+      return;
+    }
     final model = ContractModel(
       contractId: e?.contractId ?? 0,
       customerId: _selectedCustomerId!,
@@ -113,6 +222,7 @@ class _ContractFormScreenState extends State<ContractFormScreen> {
       bookingId: _selectedBookingId,
       bookingType: _bookingType,
       notes: _notes.text.trim().isEmpty ? null : _notes.text.trim(),
+      initialPayment: initialPayment,
     );
     Navigator.of(context).pop(model);
   }
@@ -133,7 +243,7 @@ class _ContractFormScreenState extends State<ContractFormScreen> {
       child: DropdownButtonHideUnderline(
         child: DropdownButton<T>(
           isExpanded: true,
-          value: value,
+          value: items.any((item) => item.value == value) ? value : null,
           items: items,
           onChanged: onChanged,
         ),
@@ -159,6 +269,9 @@ class _ContractFormScreenState extends State<ContractFormScreen> {
           _endDate = picked;
           _endDateError = null;
         }
+        if (_hasValidDateRange) {
+          _applySuggestedAmount();
+        }
       });
     }
   }
@@ -170,15 +283,32 @@ class _ContractFormScreenState extends State<ContractFormScreen> {
     setState(() {
       _selectedBookingId = value;
       if (booking != null) {
-        _bookingType = booking.bookingType;
-        _selectedCustomerId = booking.customerId;
-        _selectedApartmentId = booking.apartmentId;
+        _bookingType = _normalizeBookingType(booking.bookingType);
+        _selectedCustomerId = _validOption(
+          booking.customerId,
+          widget.customers.map((customer) => customer.customerId),
+        );
+        _selectedApartmentId = _validOption(
+          booking.apartmentId,
+          widget.apartments.map((apartment) => apartment.apartmentId),
+        );
         _startDate = booking.startDate;
         _endDate = booking.endDate;
+        _totalAmountTouched = true;
         _totalAmount.text = booking.initialTotalDueAmount.toStringAsFixed(0);
+        _initialPayment.text = booking.rentalPrice > 0
+            ? booking.rentalPrice.toStringAsFixed(0)
+            : '';
         _notes.text = booking.initialCheckNotes ?? '';
         _startDateError = null;
         _endDateError = null;
+      } else {
+        _totalAmountTouched = false;
+        _totalAmount.text = '';
+        _initialPayment.text = '';
+        if (_hasValidDateRange) {
+          _applySuggestedAmount();
+        }
       }
     });
   }
@@ -242,8 +372,14 @@ class _ContractFormScreenState extends State<ContractFormScreen> {
                   ),
                 );
               }).toList(),
-              onChanged: (value) =>
-                  setState(() => _selectedApartmentId = value),
+              onChanged: (value) {
+                setState(() {
+                  _selectedApartmentId = value;
+                  if (_hasValidDateRange) {
+                    _applySuggestedAmount();
+                  }
+                });
+              },
             ),
             const SizedBox(height: 12),
             _labeledDropdown<int>(
@@ -279,7 +415,12 @@ class _ContractFormScreenState extends State<ContractFormScreen> {
               ],
               onChanged: (value) {
                 if (value == null) return;
-                setState(() => _bookingType = value);
+                setState(() {
+                  _bookingType = _normalizeBookingType(value);
+                  if (_hasValidDateRange) {
+                    _applySuggestedAmount();
+                  }
+                });
               },
             ),
             const SizedBox(height: 12),
@@ -302,16 +443,65 @@ class _ContractFormScreenState extends State<ContractFormScreen> {
               keyboardType: const TextInputType.numberWithOptions(
                 decimal: true,
               ),
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 labelText: 'Total Amount',
-                prefixIcon: Icon(Icons.attach_money),
+                prefixIcon: const Icon(Icons.attach_money),
+                helperText: _amountHelperText(),
+                helperMaxLines: 3,
               ),
+              onChanged: (_) => _totalAmountTouched = true,
               validator: (value) {
                 final total = double.tryParse(
                   (value ?? '').replaceAll(',', ''),
                 );
                 if (total == null || total <= 0) {
                   return 'Total amount must be greater than zero';
+                }
+                return null;
+              },
+            ),
+            if (_suggestedTotalAmount() != null)
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton.icon(
+                  onPressed: () {
+                    setState(() {
+                      _totalAmountTouched = false;
+                      _applySuggestedAmount();
+                    });
+                  },
+                  icon: const Icon(Icons.auto_fix_high_outlined, size: 18),
+                  label: const Text('Use suggested amount'),
+                ),
+              ),
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: _initialPayment,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+              decoration: InputDecoration(
+                labelText: widget.existing == null
+                    ? 'Initial payment (optional)'
+                    : 'Initial payment',
+                prefixIcon: const Icon(Icons.payments_outlined),
+                helperText: widget.existing == null
+                    ? 'Recorded on the booking and shown in Payments. Leave blank if none.'
+                    : 'Updates the amount already paid on this booking.',
+                helperMaxLines: 2,
+              ),
+              validator: (value) {
+                final text = (value ?? '').trim();
+                if (text.isEmpty) return null;
+                final payment = double.tryParse(text.replaceAll(',', ''));
+                if (payment == null || payment < 0) {
+                  return 'Enter a valid payment amount';
+                }
+                final total = double.tryParse(
+                  _totalAmount.text.replaceAll(',', ''),
+                );
+                if (total != null && payment > total) {
+                  return 'Cannot exceed total amount';
                 }
                 return null;
               },

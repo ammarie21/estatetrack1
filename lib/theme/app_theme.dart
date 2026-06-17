@@ -1,20 +1,27 @@
 import 'package:flutter/material.dart';
 
+import 'package:estatetrack1/theme/app_semantic_colors.dart';
+
 class AppTheme {
   AppTheme._();
 
   static const Color _seed = Color(0xFF1565C0);
 
-  static ThemeData light() {
+  static ThemeData light() => _build(Brightness.light, AppSemanticColors.light);
+
+  static ThemeData dark() => _build(Brightness.dark, AppSemanticColors.dark);
+
+  static ThemeData _build(Brightness brightness, AppSemanticColors semantic) {
     final colorScheme = ColorScheme.fromSeed(
       seedColor: _seed,
-      brightness: Brightness.light,
+      brightness: brightness,
     );
 
     return ThemeData(
       useMaterial3: true,
       colorScheme: colorScheme,
       scaffoldBackgroundColor: colorScheme.surface,
+      extensions: [semantic],
       appBarTheme: AppBarTheme(
         centerTitle: true,
         elevation: 0,
@@ -42,6 +49,16 @@ class AppTheme {
             borderRadius: BorderRadius.circular(12),
           ),
         ),
+      ),
+      snackBarTheme: SnackBarThemeData(
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+      floatingActionButtonTheme: FloatingActionButtonThemeData(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      ),
+      dividerTheme: DividerThemeData(
+        color: colorScheme.outlineVariant.withValues(alpha: 0.6),
       ),
       tabBarTheme: TabBarThemeData(
         indicatorSize: TabBarIndicatorSize.tab,

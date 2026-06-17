@@ -4,7 +4,10 @@ import 'package:estatetrack1/models/apartment_return_model.dart';
 import 'package:estatetrack1/models/contract_model.dart';
 import 'package:estatetrack1/models/customer_model.dart';
 import 'package:estatetrack1/models/apartment_model.dart';
+import 'package:estatetrack1/models/maintenance_model.dart';
 import 'package:estatetrack1/models/rental_transaction_model.dart';
+import 'package:estatetrack1/ui/app_components.dart';
+import 'package:estatetrack1/utils/report_period.dart';
 
 /// Month grid calendar for lease starts/ends, checkout returns, and payments.
 class RentalCalendarScreen extends StatefulWidget {
@@ -15,6 +18,7 @@ class RentalCalendarScreen extends StatefulWidget {
     required this.rentalTransactions,
     required this.customers,
     required this.apartments,
+    this.maintenance = const [],
     this.onEditContract,
   });
 
@@ -23,6 +27,7 @@ class RentalCalendarScreen extends StatefulWidget {
   final List<RentalTransactionModel> rentalTransactions;
   final List<CustomerModel> customers;
   final List<ApartmentModel> apartments;
+  final List<MaintenanceModel> maintenance;
   final void Function(ContractModel contract)? onEditContract;
 
   @override
@@ -78,6 +83,19 @@ class _RentalCalendarScreenState extends State<RentalCalendarScreen> {
   bool _isPaymentDay(DateTime day) => widget.rentalTransactions.any(
     (t) => _sameDay(t.updatedTransactionDate, day),
   );
+
+  DateTime? _maintenanceDate(MaintenanceModel m) => parseReportDate(m.date);
+
+  bool _isMaintenanceDay(DateTime day) => widget.maintenance.any((m) {
+    final d = _maintenanceDate(m);
+    return d != null && _sameDay(d, day);
+  });
+
+  List<MaintenanceModel> _maintenanceForDay(DateTime day) =>
+      widget.maintenance.where((m) {
+        final d = _maintenanceDate(m);
+        return d != null && _sameDay(d, day);
+      }).toList();
 
   List<ContractModel> _contractsForDay(DateTime day) {
     return widget.contracts.where((c) {
@@ -154,14 +172,23 @@ class _RentalCalendarScreenState extends State<RentalCalendarScreen> {
       }
     }
 
+    for (final m in widget.maintenance) {
+      final d = _maintenanceDate(m);
+      if (d != null && _inFocusedMonth(d)) {
+        allEvents.add(
+          _CalendarEvent(date: d, type: _EventType.maintenance, maintenance: m),
+        );
+      }
+    }
+
     allEvents.sort((a, b) => a.date.compareTo(b.date));
 
     if (allEvents.isEmpty) {
-      return Center(
-        child: Text(
-          'No events this month',
-          style: TextStyle(color: scheme.onSurfaceVariant),
-        ),
+      return const AppEmptyState(
+        icon: Icons.event_busy_outlined,
+        title: 'No events this month',
+        message:
+            'Lease, return, payment, and maintenance dates appear here when recorded.',
       );
     }
 
@@ -177,15 +204,16 @@ class _RentalCalendarScreenState extends State<RentalCalendarScreen> {
     final selectedContracts = _contractsForDay(_selectedDay!);
     final selectedReturns = _returnsForDay(_selectedDay!);
     final selectedPayments = _paymentsForDay(_selectedDay!);
+    final selectedMaintenance = _maintenanceForDay(_selectedDay!);
 
     if (selectedContracts.isEmpty &&
         selectedReturns.isEmpty &&
-        selectedPayments.isEmpty) {
-      return Center(
-        child: Text(
-          'No events on this day',
-          style: TextStyle(color: scheme.onSurfaceVariant),
-        ),
+        selectedPayments.isEmpty &&
+        selectedMaintenance.isEmpty) {
+      return const AppEmptyState(
+        icon: Icons.event_outlined,
+        title: 'No events on this day',
+        message: 'Select another date or add bookings and payments.',
       );
     }
 
@@ -344,6 +372,48 @@ class _RentalCalendarScreenState extends State<RentalCalendarScreen> {
             );
           }),
         ],
+        if (selectedMaintenance.isNotEmpty) ...[
+          Text(
+            'Maintenance',
+            style: Theme.of(
+              context,
+            ).textTheme.labelLarge?.copyWith(color: scheme.onSurfaceVariant),
+          ),
+          const SizedBox(height: 8),
+          ...selectedMaintenance.map(
+            (m) => Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Card(
+                child: ListTile(
+                  leading: CircleAvatar(
+                    backgroundColor: Colors.teal.shade100,
+                    child: Icon(
+                      Icons.build_outlined,
+                      color: Colors.teal.shade700,
+                      size: 20,
+                    ),
+                  ),
+                  title: Text(
+                    m.description,
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                  subtitle: Text('Apt ${_apartmentNumber(int.tryParse(m.apartmentId) ?? 0)}'),
+                  trailing: Chip(
+                    label: Text(
+                      m.status,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.teal.shade700,
+                      ),
+                    ),
+                    backgroundColor: Colors.teal.shade100,
+                    side: BorderSide.none,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
       ],
     );
   }
@@ -394,6 +464,15 @@ class _RentalCalendarScreenState extends State<RentalCalendarScreen> {
         subtitle = contract != null
             ? 'Apt ${_apartmentNumber(contract.apartmentId)} • \$${t.paidInitialTotalDueAmount.toStringAsFixed(0)}'
             : '\$${t.paidInitialTotalDueAmount.toStringAsFixed(0)}';
+        break;
+      case _EventType.maintenance:
+        final m = event.maintenance!;
+        color = Colors.teal;
+        icon = Icons.build_outlined;
+        label = 'Maintenance';
+        title = m.description;
+        subtitle =
+            'Apt ${_apartmentNumber(int.tryParse(m.apartmentId) ?? 0)} • \$${m.cost.toStringAsFixed(0)}';
         break;
     }
 
@@ -474,6 +553,7 @@ class _RentalCalendarScreenState extends State<RentalCalendarScreen> {
               _LegendDot(color: Colors.red, label: 'End'),
               _LegendDot(color: Colors.purple, label: 'Return'),
               _LegendDot(color: Colors.orange, label: 'Payment'),
+              _LegendDot(color: Colors.teal, label: 'Maintenance'),
             ],
           ),
         ),
@@ -526,6 +606,9 @@ class _RentalCalendarScreenState extends State<RentalCalendarScreen> {
               final isEnd = _isEndDay(date);
               final isReturn = _isReturnDay(date);
               final isPayment = _isPaymentDay(date);
+              final isMaintenance = _isMaintenanceDay(date);
+              final hasDots =
+                  isStart || isEnd || isReturn || isPayment || isMaintenance;
 
               return GestureDetector(
                 onTap: () => setState(() => _selectedDay = date),
@@ -553,19 +636,24 @@ class _RentalCalendarScreenState extends State<RentalCalendarScreen> {
                               : scheme.onSurface,
                         ),
                       ),
-                      if (isStart || isEnd || isReturn || isPayment)
+                      if (hasDots)
                         Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
                             if (isStart) const _Dot(color: Colors.green),
-                            if (isStart && (isEnd || isReturn || isPayment))
+                            if (isStart &&
+                                (isEnd || isReturn || isPayment || isMaintenance))
                               const SizedBox(width: 2),
                             if (isEnd) const _Dot(color: Colors.red),
-                            if (isEnd && (isReturn || isPayment))
+                            if (isEnd && (isReturn || isPayment || isMaintenance))
                               const SizedBox(width: 2),
                             if (isReturn) const _Dot(color: Colors.purple),
-                            if (isReturn && isPayment) const SizedBox(width: 2),
+                            if (isReturn && (isPayment || isMaintenance))
+                              const SizedBox(width: 2),
                             if (isPayment) const _Dot(color: Colors.orange),
+                            if (isPayment && isMaintenance)
+                              const SizedBox(width: 2),
+                            if (isMaintenance) const _Dot(color: Colors.teal),
                           ],
                         ),
                     ],
@@ -602,7 +690,7 @@ class _RentalCalendarScreenState extends State<RentalCalendarScreen> {
   ][month];
 }
 
-enum _EventType { start, end, returnEvent, payment }
+enum _EventType { start, end, returnEvent, payment, maintenance }
 
 class _CalendarEvent {
   const _CalendarEvent({
@@ -611,6 +699,7 @@ class _CalendarEvent {
     this.contract,
     this.returnModel,
     this.transaction,
+    this.maintenance,
   });
 
   final DateTime date;
@@ -618,6 +707,7 @@ class _CalendarEvent {
   final ContractModel? contract;
   final ApartmentReturnModel? returnModel;
   final RentalTransactionModel? transaction;
+  final MaintenanceModel? maintenance;
 }
 
 class _Dot extends StatelessWidget {
