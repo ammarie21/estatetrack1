@@ -363,7 +363,7 @@ class SettingsScreen extends StatelessWidget {
         title: const Text('API base URL'),
         content: TextField(
           controller: controller,
-          decoration: const InputDecoration(
+          decoration: InputDecoration(
             labelText: 'Backend URL',
             hintText: ApiConfig.defaultBaseUrl,
           ),

@@ -1,12 +1,11 @@
 import 'dart:convert';
-import 'dart:io';
 import 'dart:math' as math;
 
+import 'package:estatetrack1/data/api_http_client.dart';
 import 'package:estatetrack1/utils/return_settlement.dart';
 
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
-import 'package:http/io_client.dart';
 
 import 'package:estatetrack1/config/api_config.dart';
 import 'package:estatetrack1/models/account_model.dart';
@@ -61,13 +60,7 @@ class EstateSnapshot {
 }
 
 class EstateApi {
-  EstateApi._()
-    : _client = IOClient(
-        HttpClient()
-          ..badCertificateCallback = (certificate, host, port) {
-            return host == 'localhost' || host == '127.0.0.1';
-          },
-      );
+  EstateApi._() : _client = createApiHttpClient();
 
   static final EstateApi instance = EstateApi._();
 
@@ -79,10 +72,46 @@ class EstateApi {
   List<RentalBookingModel> _cachedBookings = const [];
   List<ApartmentReturnModel> _cachedReturns = const [];
 
+  Future<http.Response> _get(Uri uri) async {
+    try {
+      return await _client.get(uri, headers: _headers).timeout(_timeout);
+    } catch (e) {
+      throw _networkError(e);
+    }
+  }
+
+  Future<http.Response> _request(Future<http.Response> future) async {
+    try {
+      return await future;
+    } catch (e) {
+      throw _networkError(e);
+    }
+  }
+
+  ApiException _networkError(Object error) {
+    if (error is ApiException) return error;
+    final raw = error.toString();
+    if (kIsWeb &&
+        (raw.contains('Failed to fetch') ||
+            raw.contains('XMLHttpRequest') ||
+            raw.contains('NetworkError'))) {
+      return ApiException(
+        'Cannot reach the API at ${ApiConfig.baseUrl}. '
+        'Use http://localhost:5170 in Settings and ensure the backend is running with CORS enabled.',
+      );
+    }
+    if (raw.contains('SocketException') ||
+        raw.contains('Connection refused') ||
+        raw.contains('Connection failed')) {
+      return ApiException(
+        'Cannot reach the API at ${ApiConfig.baseUrl}. Is the backend running?',
+      );
+    }
+    return ApiException('Network error: $raw');
+  }
+
   Future<UserModel> getUserById(int id) async {
-    final response = await _client
-        .get(_uri('/api/Users/GetUserById?id=$id'), headers: _headers)
-        .timeout(_timeout);
+    final response = await _get(_uri('/api/Users/GetUserById?id=$id'));
     _ensureStatus(response, const {200});
     return _userFromJson(_decodeMap(response.body));
   }
@@ -90,12 +119,9 @@ class EstateApi {
   Future<UserModel?> getUserByName(String name) async {
     final trimmed = name.trim();
     if (trimmed.isEmpty) return null;
-    final response = await _client
-        .get(
-          _uri('/api/Users/ByName/${Uri.encodeComponent(trimmed)}'),
-          headers: _headers,
-        )
-        .timeout(_timeout);
+    final response = await _get(
+      _uri('/api/Users/ByName/${Uri.encodeComponent(trimmed)}'),
+    );
     if (response.statusCode == 404) return null;
     _ensureStatus(response, const {200});
     return _userFromJson(_decodeMap(response.body));
@@ -103,9 +129,7 @@ class EstateApi {
 
   Future<bool> userExists(int id) async {
     if (id < 1) return false;
-    final response = await _client
-        .get(_uri('/api/Users/IsUserExist?ID=$id'), headers: _headers)
-        .timeout(_timeout);
+    final response = await _get(_uri('/api/Users/IsUserExist?ID=$id'));
     if (response.statusCode == 200) return true;
     if (response.statusCode == 404) return false;
     _ensureStatus(response, const {200, 404});
@@ -113,41 +137,31 @@ class EstateApi {
   }
 
   Future<CustomerModel> getCustomerById(int id) async {
-    final response = await _client
-        .get(_uri('/api/Customers/$id'), headers: _headers)
-        .timeout(_timeout);
+    final response = await _get(_uri('/api/Customers/$id'));
     _ensureStatus(response, const {200});
     return _customerFromJson(_decodeMap(response.body));
   }
 
   Future<BuildingModel> getBuildingById(int id) async {
-    final response = await _client
-        .get(_uri('/api/Buildings/$id'), headers: _headers)
-        .timeout(_timeout);
+    final response = await _get(_uri('/api/Buildings/$id'));
     _ensureStatus(response, const {200});
     return _buildingFromJson(_decodeMap(response.body));
   }
 
   Future<ApartmentModel> getApartmentById(int id) async {
-    final response = await _client
-        .get(_uri('/api/Apartments/$id'), headers: _headers)
-        .timeout(_timeout);
+    final response = await _get(_uri('/api/Apartments/$id'));
     _ensureStatus(response, const {200});
     return _apartmentFromJson(_decodeMap(response.body));
   }
 
   Future<ApartmentTypeModel> getApartmentTypeById(int id) async {
-    final response = await _client
-        .get(_uri('/api/ApartmentTypes/$id'), headers: _headers)
-        .timeout(_timeout);
+    final response = await _get(_uri('/api/ApartmentTypes/$id'));
     _ensureStatus(response, const {200});
     return _apartmentTypeFromJson(_decodeMap(response.body));
   }
 
   Future<RentalBookingModel> getBookingById(int id) async {
-    final response = await _client
-        .get(_uri('/api/RentalBookings/$id'), headers: _headers)
-        .timeout(_timeout);
+    final response = await _get(_uri('/api/RentalBookings/$id'));
     _ensureStatus(response, const {200});
     var booking = _bookingFromJson(_decodeMap(response.body));
     if (booking.isActive) {
@@ -173,9 +187,7 @@ class EstateApi {
   }
 
   Future<MaintenanceModel> getMaintenanceById(int id) async {
-    final response = await _client
-        .get(_uri('/api/Maintenances/$id'), headers: _headers)
-        .timeout(_timeout);
+    final response = await _get(_uri('/api/Maintenances/$id'));
     _ensureStatus(response, const {200});
     return _decorateMaintenance([
       _maintenanceFromJson(_decodeMap(response.body)),
@@ -183,14 +195,11 @@ class EstateApi {
   }
 
   Future<bool> returnExistsForBooking(int bookingId) async {
-    final response = await _client
-        .get(
-          _uri(
-            '/api/ApartmentReturns/IsReturnExistByBookingID?bookingID=$bookingId',
-          ),
-          headers: _headers,
-        )
-        .timeout(_timeout);
+    final response = await _get(
+      _uri(
+        '/api/ApartmentReturns/IsReturnExistByBookingID?bookingID=$bookingId',
+      ),
+    );
     if (response.statusCode == 200) return true;
     if (response.statusCode == 404) return false;
     _ensureStatus(response, const {200, 404});
@@ -199,9 +208,7 @@ class EstateApi {
 
   Future<ApartmentReturnModel?> getReturnById(int returnId) async {
     if (returnId < 1) return null;
-    final response = await _client
-        .get(_uri('/api/ApartmentReturns/$returnId'), headers: _headers)
-        .timeout(_timeout);
+    final response = await _get(_uri('/api/ApartmentReturns/$returnId'));
     if (response.statusCode == 404) return null;
     _ensureStatus(response, const {200});
     return _returnFromJson(_decodeMap(response.body));
@@ -642,9 +649,11 @@ class EstateApi {
     Set<int> expected = const {200, 201},
     bool allowAuthFailure = false,
   }) async {
-    final response = await _client
-        .post(_uri(path), headers: _headers, body: jsonEncode(body))
-        .timeout(_timeout);
+    final response = await _request(
+      _client
+          .post(_uri(path), headers: _headers, body: jsonEncode(body))
+          .timeout(_timeout),
+    );
     if (allowAuthFailure &&
         (response.statusCode == 401 || response.statusCode == 404)) {
       return null;
@@ -654,17 +663,19 @@ class EstateApi {
   }
 
   Future<http.Response> _put(String path, Map<String, dynamic> body) async {
-    final response = await _client
-        .put(_uri(path), headers: _headers, body: jsonEncode(body))
-        .timeout(_timeout);
+    final response = await _request(
+      _client
+          .put(_uri(path), headers: _headers, body: jsonEncode(body))
+          .timeout(_timeout),
+    );
     _ensureStatus(response, const {200});
     return response;
   }
 
   Future<void> _delete(String path) async {
-    final response = await _client
-        .delete(_uri(path), headers: _headers)
-        .timeout(_timeout);
+    final response = await _request(
+      _client.delete(_uri(path), headers: _headers).timeout(_timeout),
+    );
     _ensureStatus(response, const {200});
   }
 
@@ -675,9 +686,7 @@ class EstateApi {
     ApiException? lastError;
     for (var attempt = 0; attempt <= ApiConfig.maxRetries; attempt++) {
       try {
-        final response = await _client
-            .get(_uri(path), headers: _headers)
-            .timeout(_timeout);
+        final response = await _get(_uri(path));
         if (response.statusCode == 404) return [];
         _ensureStatus(response, const {200});
 
@@ -689,9 +698,9 @@ class EstateApi {
             .whereType<Map>()
             .map((item) => fromJson(Map<String, dynamic>.from(item)))
             .toList();
-      } on ApiException catch (e) {
-        lastError = e;
-        if (attempt >= ApiConfig.maxRetries) rethrow;
+      } catch (e) {
+        lastError = e is ApiException ? e : _networkError(e);
+        if (attempt >= ApiConfig.maxRetries) throw lastError;
       }
     }
     throw lastError ?? ApiException('Request failed for $path');

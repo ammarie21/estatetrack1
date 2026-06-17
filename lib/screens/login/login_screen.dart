@@ -1,10 +1,13 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import 'package:estatetrack1/config/api_config.dart';
 import 'package:estatetrack1/data/estate_api.dart';
 import 'package:estatetrack1/screens/home/home_screen.dart';
 import 'package:estatetrack1/screens/login/create_account_screen.dart';
 import 'package:estatetrack1/screens/login/forgot_password_screen.dart';
 import 'package:estatetrack1/settings/app_settings.dart';
+import 'package:estatetrack1/ui/api_url_dialog.dart';
 import 'package:estatetrack1/ui/app_components.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -34,6 +37,11 @@ class _LoginScreenState extends State<LoginScreen> {
     _identifierController.dispose();
     _passwordController.dispose();
     super.dispose();
+  }
+
+  Future<void> _editApiUrl() async {
+    final changed = await showApiUrlDialog(context);
+    if (changed && mounted) setState(() {});
   }
 
   Future<void> _onLogin() async {
@@ -122,6 +130,35 @@ class _LoginScreenState extends State<LoginScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
+                        if (kIsWeb) ...[
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: scheme.primaryContainer
+                                  .withValues(alpha: 0.35),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Icon(
+                                  Icons.info_outline,
+                                  color: scheme.primary,
+                                  size: 20,
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(
+                                    'Backend: ${ApiConfig.baseUrl}. '
+                                    'Start the API on HTTP port 5170, then hot restart this page.',
+                                    style: t.bodySmall,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                        ],
                         Text(
                           'Sign in',
                           style: t.titleLarge?.copyWith(
@@ -188,6 +225,10 @@ class _LoginScreenState extends State<LoginScreen> {
                         TextButton(
                           onPressed: _goToForgotPassword,
                           child: const Text('Forgot password?'),
+                        ),
+                        TextButton(
+                          onPressed: _editApiUrl,
+                          child: Text('Backend URL (${ApiConfig.baseUrl})'),
                         ),
                         TextButton(
                           onPressed: _goToCreateAccount,
